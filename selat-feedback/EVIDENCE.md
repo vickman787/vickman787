@@ -230,3 +230,233 @@ while discovery is dead on two other hosts.
       2 https://api.circle.com          1 https://router.selat.ai
 ```
 (Session 1 saw only 5 hosts here; the count grew with the x402-bazaar rename.)
+
+---
+
+# Session 3 — allowlist held; discovery ran end to end
+
+`@selat-ai/selat-cli` 0.15.7 (unchanged) · Node v22.22.2 · npm 10.9.7 · 2026-08-06
+
+## Host reachability — all six critical hosts open (curl direct, bypassing the harness proxy)
+
+```
+$ for h in api.circle.com catalog.selat.ai api.apify.com agi.apify.com \
+           api.cdp.coinbase.com mpp.dev; do
+    printf '%-24s %s\n' "$h" "$(curl -sS --noproxy '*' -o /dev/null \
+      -w '%{http_code}' --max-time 10 https://$h/)"
+  done
+api.circle.com           307
+catalog.selat.ai         404
+api.apify.com            404
+agi.apify.com            200
+api.cdp.coinbase.com     404      <- was 403 in session 2
+mpp.dev                  200      <- was 403 in session 2
+```
+
+No 403 anywhere. The session-2 GAP hosts were the whole blocker.
+
+## Merchant hosts from the session-2 allowlist — all reachable
+
+```
+x402.ottoai.services  200    api.messari.io    200    api.nansen.ai        200
+x402.alchemy.com      200    x402.tavily.com   200    x402.api.agentmail.to 302
+stabledomains.dev     200    stablesocial.dev  200    parallelmpp.dev      200
+mpp.orthogonal.com    200    api.exa.ai        404    brave.mpp.paywithlocus.com 404
+flightapi.mpp.tempo.xyz 404  api.apify.com     404    mainnet.base.org     405
+```
+
+## `selat search "web search"` — works, full 5-catalog merge
+
+```
+Intent: "web search"
+Catalog: 2596/2596 merged services (raw 2670); 690 matched a token; 88 on-target.
+
+ 1. web-search                        score 0.915
+    $0.0010  1/5 catalogs (agentic)
+    GET   https://api.agentstools.dev/search
+    why: matched web, search in name · $0.0010/call
+ 2. web-search.api.klymax402.com      score 0.899
+    $0.0030  1/5 catalogs (agentic)
+    POST  https://web-search.api.klymax402.com/api/search
+ 3. Web Search, News & Page Reader    score 0.881
+    $0.0100  1/5 catalogs (agentic)
+    GET   https://websearch.use.x402atlas.com/search
+ 4. Brave Search                      score 0.736
+    $0.0350  1/5 catalogs (mpp)
+    POST  https://brave.mpp.paywithlocus.com/brave/web-search
+ 5. search.reversesandbox.com         score 0.715
+    $0.0020  1/5 catalogs (agentic)
+    GET   https://search.reversesandbox.com/web/search
+
+(602 weaker description-only matches hidden — --json to see them.)
+```
+
+## `selat skill compare` on a clean install — dies on config, not on network (Finding 11)
+
+```
+$ selat skill compare "summarize a webpage" --limit 3
+▸ discovering candidates for "summarize a webpage" (free — no spend)…
+▸ probing 3 candidates at their catalog serviceUrl (free — never settles)…
+
+  #  SERVICE                         PRICE  RAIL  LATENCY  PROBE  REL
+  1  Automaton Webpage Change Mon..      ?  —      1116ms  ✗      ○
+     · missing --router-url or SELAT_ROUTER_URL
+  2  Wikipedia Article Summary           ?  —      1135ms  ✗      ○
+     · missing --router-url or SELAT_ROUTER_URL
+  3  YouTube Summary & Transcript        ?  —      1218ms  ✗      ○
+     · missing --router-url or SELAT_ROUTER_URL
+```
+
+Supplying the value the shipped README calls the default makes the command work:
+
+```
+$ SELAT_ROUTER_URL=https://router.selat.ai selat skill compare "summarize a webpage" --limit 3
+  1  YouTube Summary & Transcript   ?  —  1336ms  ✗   · no x402 or MPP challenge detected at …
+  2  Wikipedia Article Summary      ?  —  1433ms  ✗   · no x402 or MPP challenge detected at …
+  3  Automaton Webpage Change Mon.. ?  —  1725ms  ✗   · no x402 or MPP challenge detected at …
+```
+
+Source, `@selat-ai/selat-pay/bin/selat-pay.mjs`:
+
+```
+1192:  const routerUrl = (args.routerUrl ?? process.env.SELAT_ROUTER_URL ?? "").replace(/\/$/, "");
+1210:  if (!routerUrl) throw new Error("missing --router-url or SELAT_ROUTER_URL");
+```
+
+Documented as a default in: `selat-cli/README.md:198`, `selat-pay/README.md:36`,
+written by `selat-cli/lib/commands/init.mjs:248`.
+
+## The direct probe vs the routed settlement (Finding 12)
+
+```
+selat-pay.mjs:1097   const res = await fetch(upstreamUrl, {…});      // probeUpstream — DIRECT
+selat-pay.mjs:1339   const targetForPayment =
+                       `${routerUrl}/proxy?target=${encodeURIComponent(upstreamUrl)}`;
+selat-pay.mjs:1394   routerProbe = await fetch(targetForPayment, {…});  // ROUTED
+selat-pay.mjs:1561   paidRes     = await fetch(targetForPayment, {…});  // ROUTED
+```
+
+Proof the router reaches what the environment blocks:
+
+```
+$ curl -sS --noproxy '*' -o /dev/null -w '%{http_code}\n' https://api.agentstools.dev/search
+403
+$ curl -sS --noproxy '*' https://api.agentstools.dev/search
+Host not in allowlist: api.agentstools.dev. Add this host to your network egress settings…
+
+$ curl -sSD - --noproxy '*' \
+    "https://router.selat.ai/proxy?target=https%3A%2F%2Fapi.agentstools.dev%2Fsearch"
+HTTP/2 402
+payment-required: eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiL3Byb3h5P3RhcmdldD1odHRwcyUzQSUyRiUyRmFwaS5hZ2VudHN0b29scy5kZXYlMkZzZWFyY2gi…
+{}
+```
+
+Decoded `payment-required` (x402 v2): `amount "1050"` (= $0.00105 USDC, 6dp),
+`payTo 0x1E5Be7e87A876C04AF0ffd725adccf02e998c5C2`,
+`extra.name GatewayWalletBatched`, `verifyingContract 0x77777777dcc4d5a8b6e418fd04d8997ef11000ee`,
+offered on `eip155:` 1, 8453, 43114, 42161, 10, 137, 130, 146, 480, 1329, 999.
+
+## Same 403, as the operator sees it (Finding 13)
+
+```
+  3  web-search   ?  —  2103ms  ✗   ○
+     GET https://api.agentstools.dev/search
+     · no x402 or MPP challenge detected at https://api.agentstools.dev/search
+```
+
+```
+selat-pay.mjs:1303   if (!hasX402 && !hasMpp && !upstreamFree) {
+selat-pay.mjs:1304     throw new Error(`no x402 or MPP challenge detected at ${upstreamUrl}`);
+```
+
+`probeUpstream()` returns `{ status, x402, mpp, body }` (line ~1117) — the status is available
+and dropped.
+
+## The two candidates that did probe clean
+
+```
+"enrich a person by name and company"
+  1  Person Data Enrichment — Ema..  $1.05  routed-x402   7617ms  ✓
+     POST https://api.apify.com/v2/actors/ryanclinton~person-enrichment-lookup/run-sync-get-dataset-items
+
+"crypto market news"
+  1  Otto AI                       $0.0010  routed-x402  10416ms  ✓
+     GET https://x402.ottoai.services/crypto-news
+```
+
+Both on allowlisted hosts. Two non-network failures on reachable hosts:
+
+```
+  Brave Search  · expected 402 from router, got 502:
+                  {"error":"expected upstream 402 challenge, got 400"}   (brave.mpp.paywithlocus.com)
+  Company Enrich · no x402 or MPP challenge detected                     (mpp.orthogonal.com)
+```
+
+`mpp.orthogonal.com` is named in selat-pay's own source comment (~line 1085) as a gateway that
+validates the body before issuing 402 — the retry path exists but did not surface a challenge here.
+
+## Merchant-host census (Finding 14)
+
+Method — dump the catalog across eight broad intents, tally `endpoint.url` hostnames, match
+against the full session-2 allowlist (wildcards as suffix matches):
+
+```
+for q in search enrich price news data image weather token; do
+  selat search "$q" --top 400 --json > /tmp/c_$q.json
+done
+```
+
+```
+distinct merchant hosts seen: 526
+  covered by handoff allowlist: 49
+  NOT covered (would 403):     477
+service-entries: total 1174  reachable 399  (34.0%)
+
+top unreachable by entry count:
+   8  agent402.tools                [agentic]
+   7  gateway.apiosk.com            [agentic]
+   7  api.delx.ai                   [agentic]
+   7  x402.forgemesh.io             [agentic]
+   7  api.strale.io                 [agentic]
+   7  api.x402node.dev              [agentic]
+   6  np.orthogonal.com             [circle,agentic]
+   6  nano.blockrun.ai              [circle,agentic]
+   6  api.24klabs.ai                [agentic]
+   6  archtools.dev                 [agentic]
+   6  clonecho.builda.company       [agentic]
+   6  api.agentstools.dev           [agentic]
+   6  2s.io                         [agentic]
+   5  stableenrich.dev              [circle,agentic,mpp]
+   5  vibesprings.net               [agentic]
+   …477 total, long flat tail
+
+reachable, by entry count:
+ 223  api.apify.com                 [apify]
+  78  mpp.orthogonal.com            [mpp]
+   9  x402.ottoai.services          [circle,agentic]
+   4  apollo.mpp.paywithlocus.com   [mpp]
+   4  alphavantage.mpp.paywithlocus.com [mpp]
+   4  coingecko.mpp.paywithlocus.com    [mpp]
+   3  x402.alchemy.com              [circle,mpp]
+   3  api.nansen.ai                 [agentic,mpp]
+   3  serpapi.mpp.tempo.xyz         [mpp]
+   3  parallelmpp.dev               [circle,mpp]
+   …49 total
+```
+
+## `selat doctor` — third session, still no network section (Finding 10, re-confirmed)
+
+```
+Binaries:            ✓ node v22.22.2   ✓ npm 10.9.7   ✓ git 2.43.0
+Agent-payment skill: ✓ skill at …/@selat-ai/selat-discovery
+Circle CLI:          ✗ circle CLI not installed — install Circle CLI, then run `selat init`
+Agent Wallet:        ✗ no agent wallet found — run `selat init`
+Spending policy:     ⚠ could not read the wallet spending policy
+selat-pay:           ✓ selat-pay installed (bundled, v0.9.4)
+Config:              ✗ /root/.config/selat-pay/.env missing or empty — run `selat init`
+3 check(s) failed.
+```
+
+Run on a network where every SELAT host resolves and answers. `doctor` reports nothing about it —
+and it does not check `SELAT_ROUTER_URL`, which is the one config value Finding 11 shows will
+break a free command.

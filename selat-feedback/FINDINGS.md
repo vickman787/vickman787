@@ -354,3 +354,207 @@ Discovery (bounty step 2) is blocked pending `api.cdp.coinbase.com` and `mpp.dev
 the environment's egress allowlist. Wallet, funding, and paid calls (steps 3–6) are not started;
 `api.circle.com` is reachable, so `selat init` is not itself blocked, but it needs the user's
 email and an OTP they have to type, and funding needs their USDC.
+
+---
+
+# Session 3 — the allowlist finally held, discovery ran, and the real bug surfaced
+
+**Date:** 2026-08-06 · `@selat-ai/selat-cli` **still 0.15.7** (no release between sessions 1–3)
+
+All six hosts from the session-2 handoff are reachable this run, including the two that were
+missing (`api.cdp.coinbase.com`, `mpp.dev`). `selat search` works. Findings 7–10 are therefore
+confirmed-and-closed from the outside: the fan-out is fatal exactly as described, and widening
+the allowlist is what fixed it.
+
+That unblocked step 2 — and step 2 immediately produced a better bug than anything in sessions
+1–2. **Findings 11 and 12 are the two I would actually fix.** Finding 12 in particular is a
+one-line change that would have prevented all three sessions of this bounty run from stalling.
+
+## Finding 11 — `selat-pay` documents a default router URL and then doesn't apply it
+
+`selat skill compare` is advertised as free and wallet-free: *"free-probes each candidate's live
+402 at its catalog serviceUrl (never settles)"*. On a clean install it fails on every candidate:
+
+```
+1  Automaton Webpage Change Mon..   ?  —  1116ms  ✗   · missing --router-url or SELAT_ROUTER_URL
+2  Wikipedia Article Summary        ?  —  1135ms  ✗   · missing --router-url or SELAT_ROUTER_URL
+3  YouTube Summary & Transcript     ?  —  1218ms  ✗   · missing --router-url or SELAT_ROUTER_URL
+```
+
+Every column the command exists to fill — PRICE, RAIL — renders `?` and `—`. The cause is two
+lines apart in `selat-pay.mjs`:
+
+```js
+1192:  const routerUrl = (args.routerUrl ?? process.env.SELAT_ROUTER_URL ?? "").replace(/\/$/, "");
+1210:  if (!routerUrl) throw new Error("missing --router-url or SELAT_ROUTER_URL");
+```
+
+There is no fallback. Meanwhile the value is documented as a *default* in three shipped files:
+
+```
+selat-cli/README.md:198            SELAT_ROUTER_URL=https://router.selat.ai   # default SELAT Router
+selat-pay/README.md:36             SELAT_ROUTER_URL=https://router.selat.ai
+selat-cli/lib/commands/init.mjs:248   SELAT_ROUTER_URL: routerUrl,
+```
+
+`init.mjs` writes it into `~/.config/selat-pay/.env` — so the "default" only materialises after
+`selat init`, which requires a wallet. The result is that a **free, no-spend, no-wallet command is
+gated behind wallet creation for no functional reason.** Exporting the documented value by hand
+fixes it completely:
+
+```
+SELAT_ROUTER_URL=https://router.selat.ai selat skill compare "summarize a webpage" --limit 3
+```
+
+**Fix:** `?? "https://router.selat.ai"` at line 1192. Or have `skill compare` fall back to it,
+since it never settles.
+
+## Finding 12 — the 402 probe goes direct to the merchant, but the router already proxies it
+
+This is the important one.
+
+`selat-pay` talks to two different places for the same call. Settlement goes through the router:
+
+```js
+1339:  const targetForPayment = `${routerUrl}/proxy?target=${encodeURIComponent(upstreamUrl)}`;
+1394:  routerProbe = await fetch(targetForPayment, …);   // discovery of the challenge, routed
+1561:  paidRes     = await fetch(targetForPayment, …);   // settlement, routed
+```
+
+But the *detection* probe that decides whether a service is payable at all goes straight to the
+merchant:
+
+```js
+1097:  const res = await fetch(upstreamUrl, …);   // probeUpstream() — direct, unrouted
+```
+
+So `selat search` / `selat skill compare` require **direct egress to every merchant domain in the
+catalog**, even though SELAT operates a proxy that already reaches them and is already in the code
+path a few lines later.
+
+I verified the router proxy reaches a host this environment blocks:
+
+```
+$ curl -s -o /dev/null -w '%{http_code}' https://api.agentstools.dev/search
+403        Host not in allowlist: api.agentstools.dev
+
+$ curl -sD - "https://router.selat.ai/proxy?target=https%3A%2F%2Fapi.agentstools.dev%2Fsearch"
+HTTP/2 402
+payment-required: eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2UiOnsidXJsIjoiL3Byb3h5P3Rhcmdl…
+```
+
+That decodes to a complete x402 v2 challenge — `amount: "1050"` ($0.00105 USDC) across 10 chains,
+`payTo 0x1E5B…c5C2`. **The blocked host is fully probeable through SELAT's own router.**
+
+**Fix:** route `probeUpstream()` through `${routerUrl}/proxy?target=…` — the URL the function 240
+lines below it already builds. It is free (402 challenges never settle) and it collapses SELAT's
+egress requirement from *the entire merchant long tail* to **one host: `router.selat.ai`**.
+
+Three sessions of this bounty were spent grepping `node_modules` for hostnames to hand the user
+for their allowlist. Finding 12 makes that entire exercise unnecessary.
+
+## Finding 13 — a network 403 is reported as a merchant protocol defect
+
+When the direct probe from Finding 12 is blocked, this is what the operator sees:
+
+```
+3  web-search   ?  —  2103ms  ✗
+   GET https://api.agentstools.dev/search
+   · no x402 or MPP challenge detected at https://api.agentstools.dev/search
+```
+
+The actual response was `403 Host not in allowlist: api.agentstools.dev` — a network policy
+decision, from the proxy, about the *operator's* environment. The message blames the merchant for
+not speaking x402.
+
+`probeUpstream()` captures `res.status` and returns it, but the caller discards it:
+
+```js
+1303:  if (!hasX402 && !hasMpp && !upstreamFree) {
+1304:    throw new Error(`no x402 or MPP challenge detected at ${upstreamUrl}`);
+```
+
+An inline comment three lines up shows this is deliberate — *"401/403 are auth answers, not body
+validation"* — which is true for the retry logic and wrong for the error message. 403 is the one
+status that most often is not the merchant's fault.
+
+Across five intents this misattribution fired on **19 of 23 candidates**. An operator reading that
+table concludes the SELAT catalog is full of broken listings. It isn't; their egress policy is
+narrow. This is Findings 2 and 9 (bad network diagnostics) recurring a third time, one layer down.
+
+**Fix:** include the status: `` `no x402 or MPP challenge detected at ${url} (HTTP ${status})` ``,
+and special-case 403 with the response body, which in this case names the exact host to allow.
+
+## Finding 14 — the merchant host set is unbounded, so allowlisting is not a viable strategy
+
+To size Finding 12's blast radius I dumped the catalog across eight broad intents
+(`selat search "<q>" --top 400 --json`, q ∈ search/enrich/price/news/data/image/weather/token) and
+tallied `endpoint.url` hostnames against the full allowlist from the session-2 handoff:
+
+```
+distinct merchant hosts seen:      526
+  covered by the allowlist:         49
+  NOT covered (would 403):         477   (91%)
+service entries:  1174 total,  399 reachable  (34.0%)
+```
+
+The 49 reachable hosts are almost entirely three wildcard families — `api.apify.com` (223 entries),
+`mpp.orthogonal.com` (78), `*.mpp.paywithlocus.com` and `*.mpp.tempo.xyz` (~45 combined). The 477
+unreachable ones are a flat long tail, mostly from the `agentic` (x402 Bazaar) source, with a
+median of ~2 entries each: `agent402.tools`, `api.delx.ai`, `x402.forgemesh.io`, `api.strale.io`,
+`api.x402node.dev`, `api.24klabs.ai`, `clonecho.builda.company`, `2s.io`, …
+
+Every merchant registers its own domain. The set grows every time someone lists a service. No
+allowlist can track it, and the top-ranked result for a given intent is more likely than not to sit
+on a host nobody has ever heard of. **Any egress-restricted environment — a corp network, a CI
+runner, an agent sandbox — cannot use SELAT discovery as currently built.** That is the same
+conclusion as Finding 12, arrived at from the data instead of the source.
+
+## Step 2 (discovery) — what the ranking actually surfaced
+
+This is the graded part of the bounty, so: **the ranking is good.** Better than I expected.
+
+`selat search "web search"` merged **2596 services from all 5 catalogs** (raw 2670 → deduped),
+`690 matched a token, 88 on-target`, and returned a sensible top 5 ordered by a blend of name
+match and price. The `why:` line on each row (`matched web, search in tags+name · $0.0010/call`)
+is the right idea — it makes the ranking auditable instead of magic, and I could tell at a glance
+when a match was name-only versus tag-corroborated. The hidden-match count
+(`602 weaker description-only matches hidden`) is honest about the tail rather than pretending
+the top 5 is the whole story.
+
+`selat skill list --available` returned the same 19 skills as session 1, with reliability dots and
+`checked 9h ago`. Still the best-designed surface in the CLI.
+
+Two gaps worth naming:
+
+1. **Ranking is payability-blind.** Nothing in `selat search` scoring accounts for whether a
+   service can currently be paid. Sorting is name-match × price. `--explain` is documented as
+   showing "why each match is or isn't payable right now", but the ranking itself doesn't use it,
+   so the top result is routinely one that cannot be reached or settled. Feeding the
+   `skill compare` probe result — or the registry reliability dot that `skill list` already
+   has — back into `search` ordering would be a large quality win.
+2. **`1/5 catalogs` on nearly every result.** Almost nothing is corroborated across registries,
+   so the count is near-constant and carries little signal. Where it *does* vary
+   (`stableenrich.dev` at `[circle,agentic,mpp]`) that's genuinely useful — a service three
+   registries independently list is a better bet. Worth surfacing more prominently than the top-5
+   name match.
+
+Measured payability, five intents, `--limit 5` (23 candidates probed):
+
+| Outcome | n | |
+|---|---|---|
+| live 402, priced | **2** | Apify person-enrichment $1.05 · Otto AI crypto-news $0.0010 |
+| egress-blocked, misreported as "no challenge" (Finding 13) | 19 | |
+| reachable host, router 502 `expected upstream 402, got 400` | 1 | `brave.mpp.paywithlocus.com` |
+| reachable host, body validated before 402 | 1 | `mpp.orthogonal.com` |
+
+Both successes are on allowlisted hosts. Every failure is explained by Finding 12 or by a
+merchant-side body-validation quirk that `probeUpstream()` already has retry logic for. **The
+catalog is not the problem; the direct probe is.**
+
+## Status
+
+Steps 1–2 (install, discovery) are **complete**. Findings 11–14 are new this session; 7–10 are
+confirmed. Steps 3–6 (wallet, funding, paid calls, verify) are unblocked network-wise —
+`api.circle.com` answers and the reachable-merchant list above has enough live endpoints to clear
+the ≥3-endpoint / ≥0.5 USDC bar — but they are waiting on the user for an email, an OTP, and USDC.
