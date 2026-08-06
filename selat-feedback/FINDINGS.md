@@ -174,3 +174,183 @@ selat doctor                          # local-only checks, no network probe
 selat skill list --available          # works (raw.githubusercontent.com)
 selat search "web search"             # fails on api.apify.com
 ```
+
+---
+
+# Session 2 — the allowlist was fixed, and discovery still failed
+
+The user reconfigured the environment's egress policy to allow the hosts session 1 identified,
+and I re-ran from a fresh container. `selat search` still fails. That turned out to be more
+interesting than a working run would have been: it produced a much sharper version of Finding 1,
+and two new findings that I think are the most actionable things in this document.
+
+Nothing below is speculative — every claim has a line number in the shipped 0.15.7 package or
+raw terminal output in `EVIDENCE.md`.
+
+## Finding 7 — one unreachable registry zeroes out all discovery, and the fix is already in the file
+
+`selat search` fans out to **five** independent catalog registries. Four of them are bare entries
+in a `Promise.all`, so the first rejection sinks the entire catalog — including the four registries
+that answered fine.
+
+`discover_federated_catalog.mjs:1102`:
+
+```js
+const [circle, agentic, mpp, apify, selat] = await Promise.all([
+  loadOrFetchCircleCatalog({ refresh }),
+  loadOrFetchAgenticCatalog({ refresh }),
+  loadOrFetchMppCatalog({ refresh }),
+  loadOrFetchApifyCatalog({ refresh }),
+  // 5th registry: SELAT-native first-party catalog (catalog.selat.ai).
+  // Isolated so an outage here can't sink the other four.
+  loadOrFetchSelatCatalog({ refresh }).catch((err) => {
+    warn(`SELAT catalog load failed: ${err.message}`);
+    return { services: [] };
+  }),
+]);
+```
+
+You already know this is a problem — that comment says so, and the `.catch` is exactly the right
+shape. It's just applied to one of five. In my run, `api.circle.com`, `api.apify.com`, and
+`catalog.selat.ai` were all reachable and `api.cdp.coinbase.com` was not, and I got **zero**
+results rather than three registries' worth.
+
+This is not only a sandbox problem. Any one of five third-party registries having a bad ten
+minutes takes `selat search` and `selat run` down for every user, everywhere. Five dependencies
+wired in series is five times the outage surface of one, and none of the four is load-bearing
+enough to deserve that.
+
+**Fix:** give sources 1–4 the same `.catch` source 5 already has (or `Promise.allSettled` and
+partition), then print what degraded — `catalog: 4/5 sources (agentic unreachable)`. A partial
+catalog is enormously more useful than a `Fatal:`, and the warn line keeps it honest. This is the
+single highest-leverage change in this document; it's a handful of lines and it converts a hard
+failure into a soft one.
+
+## Finding 8 — Finding 1, confirmed the hard way: the documented allowlist names 2 of 5 catalog hosts
+
+Session 1 reported that the printed allowlist was missing `api.apify.com`. I flagged the risk of
+drift. Session 2 is that drift, observed: I ran on a network configured to the documented
+allowlist and discovery still died, on a host the docs have never mentioned.
+
+The constant, `lib/host.mjs:83`:
+
+```js
+// The catalog hosts SELAT discovery must reach. Mirrors guides/cursor.md +
+// install.md so the in-CLI hint and the docs stay in lockstep.
+const SANDBOX_ALLOW = ["api.circle.com", "*.selat.ai", "registry.npmjs.org", "*.npmjs.org"];
+```
+
+The actual registries, from the discovery scripts:
+
+| Registry | Host | In `SANDBOX_ALLOW`? |
+|---|---|---|
+| Circle | `api.circle.com` | ✅ |
+| SELAT-native | `catalog.selat.ai` | ✅ (via `*.selat.ai`) |
+| x402 Bazaar | `api.cdp.coinbase.com` | ❌ |
+| MPP | `mpp.dev` | ❌ |
+| Apify | `api.apify.com`, `agi.apify.com` | ❌ |
+
+Two of five. And `install.md:64` states the wrong pair as fact:
+
+> `api.circle.com` + `*.selat.ai` are the catalog hosts discovery needs
+
+The comment above the constant says it "mirrors guides/cursor.md + install.md so the in-CLI hint
+and the docs stay in lockstep" — and it does. All three are in lockstep and all three are wrong,
+which is what a hand-maintained mirror buys you. The most recent commit on `selat-plugins` is
+`chore/x402-bazaar-rename`; the Bazaar registry got renamed and the allowlist that has to know
+about it didn't move. That's the drift, one commit old.
+
+**Fix:** the same one as Finding 1, and it now has a second reason to happen. Export the host list
+from the discovery scripts that own it, build `SANDBOX_ALLOW` from that, and generate the docs
+snippet from the same export. The correct list today is:
+
+```json
+["api.circle.com", "*.selat.ai", "api.cdp.coinbase.com", "mpp.dev",
+ "*.apify.com", "registry.npmjs.org", "*.npmjs.org"]
+```
+
+## Finding 9 — the egress hint is gated on a probe that goes silent exactly when it's needed
+
+This is the one I'd fix first after Finding 7, because it actively misleads.
+
+The remediation block from Finding 1 didn't print in session 2. Not because it was fixed —
+because it was suppressed. `lib/host.mjs:109`:
+
+```js
+export async function egressLikelyBlocked() {
+  const r = await fetch("https://api.circle.com/v2/x402/discovery/resources", { ... });
+  return r.status === 403 || r.status === 407;
+}
+```
+
+One host. `api.circle.com`. And all three call sites gate the hint on it:
+
+```
+lib/commands/search.mjs:109   if (await egressLikelyBlocked()) console.error(sandboxHintText());
+lib/commands/skill.mjs:518    if (await egressLikelyBlocked()) console.error(sandboxHintText());
+lib/commands/run.mjs:124      if (await egressLikelyBlocked()) console.error(sandboxHintText());
+```
+
+`api.circle.com` is the first host in `SANDBOX_ALLOW`, so it is the host a user is *most likely
+to have already allowed*. Once they do, it answers 307, the probe returns `false`, and the hint
+disappears — while discovery stays broken on `api.cdp.coinbase.com` and `mpp.dev`.
+
+So the diagnostic is designed to fail in precisely the population it exists to serve: users who
+read the docs and followed them partway. Do nothing and you get the hint. Follow the instructions
+and you lose it. Session 1 got the hint (nothing was allowed); session 2 followed the guidance and
+got a bare `Fatal:` line.
+
+The docstring's stated principle is right — "fail-safe: any ambiguity resolves to `false` (don't
+cry wolf)" — but a single sentinel host isn't a fail-safe, it's a coin flip on which host the
+user happened to allow first.
+
+**Fix:** probe all five catalog hosts concurrently and report per-host, rather than reducing them
+to one boolean:
+
+```
+Catalog hosts:
+  ✓ api.circle.com          ✓ catalog.selat.ai       ✓ api.apify.com
+  ✗ api.cdp.coinbase.com    ✗ mpp.dev
+Allowlist the two blocked hosts in your egress policy.
+```
+
+That is strictly more informative than the current boolean, it can't go silent when it's needed,
+and it can't drift from the real host list if it's derived from Finding 8's shared export.
+
+## Finding 10 — `selat doctor` is still network-blind, now confirmed against a live network
+
+Session 1 reported this from a fully-blocked network, where it could be argued the probe would
+have failed anyway. Session 2 removes that caveat: on a network where five of seven SELAT hosts
+answer and two don't, `doctor` reports the same three wallet failures and says nothing about the
+two blocked hosts that are the only thing actually stopping me.
+
+What makes this worth repeating rather than just re-filing: **`lib/host.mjs` already contains a
+working reachability probe**. `egressLikelyBlocked()` is the mechanism `doctor` is missing. It's
+imported by `search`, `skill`, and `run` — every command except the one whose entire job is
+diagnosing setup. Generalize it to the full host list per Finding 9 and call it from `doctor`, and
+Findings 8, 9 and 10 all close with one shared function.
+
+I want to be clear about the cost of it being missing, because it's the whole story of this run:
+two sessions, two container rebuilds, and a round-trip through the user to change an environment
+policy — and both times the thing that told me which host to allow was `curl` and `grep` through
+`node_modules`, not SELAT. A `Network:` section in `doctor` would have collapsed both sessions
+into one command.
+
+## What this changes about the earlier findings
+
+Finding 2 (bare `fetch failed` behind a CONNECT proxy) stands, and Finding 7 raises its stakes:
+with sources 1–4 in a `Promise.all`, a nameless `fetch failed` from any one of them takes down
+discovery with no indication of which of five hosts to investigate. Fix Finding 7 and even an
+unnamed failure degrades to a warning line next to four working registries.
+
+Finding 3 (Cursor-specific advice in every harness) also stands, and Finding 9 adds a wrinkle:
+the advice is not just harness-wrong, it's conditional on a probe that misfires. On this run the
+Cursor-flavoured hint was *correctly* suppressed, but for the wrong reason — not "you're not in
+Cursor", just "`api.circle.com` happened to answer".
+
+## Status
+
+Discovery (bounty step 2) is blocked pending `api.cdp.coinbase.com` and `mpp.dev` being added to
+the environment's egress allowlist. Wallet, funding, and paid calls (steps 3–6) are not started;
+`api.circle.com` is reachable, so `selat init` is not itself blocked, but it needs the user's
+email and an OTP they have to type, and funding needs their USDC.
