@@ -129,12 +129,17 @@ Finding 1's correct allowlist as a by-product.
 ## Finding 6 — the skill-contribution path is unreachable from a locked-down network
 
 For step 8: `meta/skill-creator` is well written and the `serviceUrl` vs `url` warning ("read this
-twice") is clearly hard-won. But the merge gate is `selat skill verify`, which probes each step's
-live 402 challenge, and `--pay` needs a funded wallet. Both need the catalog and merchant hosts. So a
-contributor behind an egress policy can scaffold and statically validate a skill but **cannot produce
-a mergeable PR at all** — the verify receipt that gates merge is unobtainable. Worth calling out in
-`CONTRIBUTING.md`, and worth considering whether static validation + a maintainer-run paid verify is
-enough for a first-time contributor.
+twice") is clearly hard-won. The merge gate is `selat skill verify`, which probes each step's live
+402 challenge. Credit where due: **the gating receipt comes from the free probe, not `--pay`** — a
+contributor needs no funded wallet to produce a mergeable PR, and the skill-creator frontmatter says
+so explicitly. Good call, and worth advertising louder than it currently is.
+
+The remaining constraint is purely network: verify must reach the merchant `serviceUrl` hosts, and
+authoring at all requires the catalogue (`api.apify.com` / `catalog.selat.ai`) to choose endpoints
+from. So behind an egress policy a contributor can scaffold and statically validate but cannot
+verify — and the failure will surface as the same nameless `fetch failed` from Finding 2, at which
+point they cannot tell an unreachable merchant from a genuinely dead endpoint. Fixing Finding 2
+largely fixes this one too.
 
 ---
 
