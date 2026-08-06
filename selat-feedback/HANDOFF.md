@@ -22,17 +22,40 @@ is reachable. **All six must be reachable** or `selat search` will fail again. D
 `selat doctor` or the CLI's own sandbox hint for this; per Findings 9 and 10 neither one probes
 these hosts.
 
-The full allowlist to request:
+The full allowlist. The user applied most of this at the end of session 2; the two hosts marked
+**GAP** were missing from what they set and are the ones that break discovery.
 
 ```
-api.circle.com  *.selat.ai  api.cdp.coinbase.com  mpp.dev  *.apify.com
+# the five catalog registries — all required, Promise.all means any miss is fatal
+*.circle.com
+selat.ai  *.selat.ai
+*.apify.com
+api.cdp.coinbase.com          # GAP — x402 Bazaar; no coinbase entry was set
+mpp.dev                       # GAP — bare domain; NOT covered by *.mpp.tempo.xyz etc.
+
+# infrastructure
+raw.githubusercontent.com     # the only host `selat skill list --available` needs
 registry.npmjs.org  *.npmjs.org
+
+# merchant endpoints for paid calls
+*.mpp.paywithlocus.com  *.mpp.tempo.xyz  mpp.orthogonal.com  parallelmpp.dev
+*.x402.paysponge.com  x402.alchemy.com  x402.tavily.com  x402.ottoai.services
+x402.api.agentmail.to  api.exa.ai  api.messari.io  api.nansen.ai
+stabledomains.dev  stablesocial.dev
+
+# chain RPCs for funding
+mainnet.base.org  mainnet.optimism.io  arb1.arbitrum.io
 ```
 
-Paid calls will additionally need merchant hosts, which are per-endpoint and not knowable until
-discovery works. Ones seen in the package: `gateway-api.circle.com` (reachable), `api.exa.ai`
-(reachable), `x402.alchemy.com` (reachable), `agentskills.io` (blocked), `api.coingecko.com`
-(blocked). Expect one more allowlist round after picking endpoints, or ask for a broader policy.
+Two traps worth knowing, both bare domains that look covered but aren't: `mpp.dev` (the MPP
+registry, sibling to three `*.mpp.*` wildcards that don't match it) and `parallelmpp.dev`. The
+user's matcher treats `selat.ai` and `*.selat.ai` as distinct, so bare domains need their own line.
+
+Lower priority, referenced in the discovery package and blocked when checked: `agentskills.io`,
+`api.coingecko.com`. Not on the critical path.
+
+The merchant list came from `grep -rhoE '(serviceUrl|url)"?:\s*"?https://[^"]+' ` over
+`/workspace/selat-ai/selat-skills`. Re-run it if a paid call 403s on a host not listed above.
 
 ## State as of this handoff
 
