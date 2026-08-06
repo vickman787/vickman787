@@ -76,6 +76,18 @@ surface the price, get an explicit OK per call. `selat freeze` is the kill switc
 `/workspace/selat-ai/selat-skills/meta/skill-creator/SKILL.md`, run `selat skill validate` and the
 free `selat skill verify`, then stop and hand it to them.
 
+## Decisions the user made at the end of session 2
+
+- **Widen the allowlist and restart.** They are adding the seven hosts above and starting a fresh
+  session. Confirm reachability first thing — if `api.cdp.coinbase.com` or `mpp.dev` still 403,
+  the policy didn't apply; say so and stop rather than burning a third session on it.
+- **Proceed with the wallet and paid calls.** Steps 3–5 are approved to run, target the
+  ≥3 endpoints / ≥0.5 USDC bar. Ask for their email at the start of the session so `selat init`
+  isn't waiting on it later, and relay the OTP prompt verbatim — they type the code.
+- They accept that the wallet and local `selat history` die with the container. Capture the
+  `selat history` / `selat spend` output for the submission **before** the session goes idle,
+  not at the end.
+
 ## Standing constraints from the user
 
 - Confirm before anything that spends or moves funds. Every time, not once.
