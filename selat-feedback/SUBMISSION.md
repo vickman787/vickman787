@@ -1,4 +1,4 @@
-# SELAT bounty submission — vickman787
+# SELAT bounty submission, vickman787
 
 Full write-up: **https://github.com/vickman787/vickman787/blob/Json/selat-feedback/FINDINGS.md**
 (24 findings, with source line numbers and reproductions)
@@ -17,10 +17,10 @@ Raw terminal output: **[`EVIDENCE.md`](https://github.com/vickman787/vickman787/
 | Duration | Three sessions over ~8 hours |
 
 Ran the full flow: install → discovery → wallet → funding → paid calls → verify → skill contribution.
-Completed steps 1–6 and the optional step 8.
+Completed steps 1 to 6 and the optional step 8.
 
 **Sessions 1 and 2 produced no paid calls at all.** Both were consumed entirely by network egress
-problems — not because the sandbox was unusually strict, but because SELAT's own documentation and
+problems, not because the sandbox was unusually strict, but because SELAT's own documentation and
 error messages named the wrong hosts to allow. That is Findings 1, 7, 8, 9 and 13, and it is worth
 reading as one story rather than five bugs.
 
@@ -47,7 +47,7 @@ Three things I'd single out as well-designed:
 
 ### What was missing or ranked oddly
 
-**Ranking is payability-blind — this is the big one.** Scoring is name-match × price. Nothing in it
+**Ranking is payability-blind, this is the big one.** Scoring is name-match × price. Nothing in it
 accounts for whether a service can actually be paid *right now*. `--explain` is documented as
 showing "why each match is or isn't payable right now", but the ranking itself doesn't consume
 that, so the top result is routinely one that cannot be reached or settled.
@@ -67,14 +67,14 @@ I measured it. I free-probed 42 catalogue endpoints across every reachable merch
 **`*.mpp.paywithlocus.com` went 0 for 13.** CoinGecko, Brave Search, Wolfram|Alpha, Stability AI,
 ScreenshotOne, Deepgram, Hunter, RentCast and Billboard are all listed, all on a host that answers
 HTTP, and none of them served a payment challenge. Nothing in `selat search` output distinguishes
-those listings from the ones that work — they rank identically.
+those listings from the ones that work, they rank identically.
 
 Feeding the `skill compare` probe result, or the reliability dot `skill list` already has, back
 into `search` ordering would be a large quality win.
 
 **`1/5 catalogs` is near-constant and therefore carries little signal.** Almost nothing is
-corroborated across registries. Where it *does* vary — `stableenrich.dev` showing
-`[circle,agentic,mpp]` — that's genuinely useful information: a service three registries
+corroborated across registries. Where it *does* vary, `stableenrich.dev` showing
+`[circle,agentic,mpp]`, that's genuinely useful information: a service three registries
 independently list is a better bet. Worth surfacing more prominently than a name match.
 
 **Prices in the catalogue are not the prices you pay.** Every call charged ~5% over the listed
@@ -97,13 +97,13 @@ search output will misjudge every call.
   which host was at fault. (Finding 7)
 - **The shipped allowlist constant names 2 of the 5 catalogue hosts** and asserts those two are the
   complete set. (Finding 8)
-- **The egress hint is gated on a probe of `api.circle.com` alone** — the host users allow *first* —
+- **The egress hint is gated on a probe of `api.circle.com` alone**, the host users allow *first*,
   so the hint goes silent for exactly the users who followed the docs partway. (Finding 9)
 
 ### Wallet setup
 
 - **`selat init`'s documented headless path can't complete an init.** `--email` and `--wallet` are
-  advertised "for agent shells / CI with no TTY", and both are honoured — then step 4 of 8 shells
+  advertised "for agent shells / CI with no TTY", and both are honoured, then step 4 of 8 shells
   out to the Circle CLI, which opens its own TTY-only OTP prompt and exits 1. Its remediation then
   points you at raw `circle wallet login`, i.e. outside the abstraction SELAT is selling. I worked
   around it by running `selat init` under `script(1)` so it drove the Circle login itself.
@@ -122,7 +122,7 @@ search output will misjudge every call.
 - **`selat doctor`'s "did my deposit land?" advice is an invalid command.**
   `circle gateway balance --all` errors with `--address, --chain are required`. That message is
   shown at the exact moment a user is anxious about whether their money arrived. (Finding 19)
-- Deposit-to-spendable took ~10 minutes, at the far end of the documented 5–10.
+- Deposit-to-spendable took ~10 minutes, at the far end of the documented 5 to 10.
 
 ### Payment (this is where it cost money)
 
@@ -131,7 +131,7 @@ search output will misjudge every call.
   schema returned `422` and was billed another $0.0105. **$0.021 of my $0.583 bought two error
   messages.** (Finding 21)
 - **SELAT's own generated command would have done the same thing.** Every POST record in the
-  catalogue ships `exec_hints[].cmd` ready to paste, and every one of them says `--body '{}'` —
+  catalogue ships `exec_hints[].cmd` ready to paste, and every one of them says `--body '{}'`,
   while the *same record* carries `inputSchema.required`. `parallelmpp.dev` needs
   `["input","processor"]`, `stablesocial.dev` needs `["keywords"]`. Copy-pasting the hint SELAT
   generates is a paid 400. (Finding 20)
@@ -139,7 +139,7 @@ search output will misjudge every call.
   will reject, because it never sends the body. My "10 verified endpoints" were verified only to
   the depth of *will quote a price*.
 - **A network 403 is reported as a merchant defect.** When the direct probe is blocked, you get
-  `no x402 or MPP challenge detected at <url>` — the actual response was
+  `no x402 or MPP challenge detected at <url>`, the actual response was
   `403 Host not in allowlist`. `probeUpstream()` captures `res.status` and the caller discards it.
   This fired on **19 of 23** candidates and made the catalogue look full of broken listings when
   the real cause was my egress policy. (Finding 13)
@@ -160,8 +160,8 @@ The ledger records the outcome accurately and impotently:
 
 `ok:false`, `outcome:"failed"`, money gone. Nothing between "the user typed a command" and "the
 USDC moved" inspects the body against the `inputSchema` SELAT already holds and already ships in
-its catalogue payload. The pieces exist — `probeUpstream()` has a sample-value generator for
-exactly this, and there's a `SELAT_PAY_VERIFIED_SCHEMAS_PATH` store — and neither runs on the
+its catalogue payload. The pieces exist, `probeUpstream()` has a sample-value generator for
+exactly this, and there's a `SELAT_PAY_VERIFIED_SCHEMAS_PATH` store, and neither runs on the
 paying path. There is also no `--dry-run` on `selat-pay`, though `selat run` advertises one.
 
 What makes this more than an oversight: **`meta/skill-creator/SKILL.md` warns contributors about
@@ -177,7 +177,7 @@ trivial. (Findings 20, 21, 24)
 ### The structural counterpart, and the one I'd actually fix first
 
 **Route the 402 probe through your own router.** `selat-pay` already builds
-`${routerUrl}/proxy?target=<upstream>` at line 1339 and uses it for settlement — but the
+`${routerUrl}/proxy?target=<upstream>` at line 1339 and uses it for settlement, but the
 *detection* probe at line 1097 fetches the merchant directly. So discovery requires direct egress
 to every merchant domain in the catalogue, while settlement doesn't.
 
@@ -192,11 +192,11 @@ HTTP/2 402
 payment-required: eyJ4NDAyVmVyc2lvbiI6MiwicmVzb3VyY2Ui…
 ```
 
-That decodes to a complete x402 v2 challenge — `amount "1050"` ($0.00105) across 10 chains. **The
+That decodes to a complete x402 v2 challenge, `amount "1050"` ($0.00105) across 10 chains. **The
 blocked host is fully probeable through SELAT's own router.**
 
 Why it matters at scale: I censused the catalogue across eight intents and found **526 distinct
-merchant hosts, 477 of them (91%) outside any allowlist I could reasonably maintain** — only 34%
+merchant hosts, 477 of them (91%) outside any allowlist I could reasonably maintain**, only 34%
 of catalogue entries were reachable. Every merchant registers its own domain, and the set grows
 with every listing. No allowlist can track it. **Moving the probe to the router collapses SELAT's
 egress requirement from the entire merchant long tail to one host.** It is a one-line change, and
@@ -204,7 +204,7 @@ it would have saved all three sessions of this run. (Findings 12, 14)
 
 ---
 
-## 5. Gateway transactions — $0.582750 USDC across 6 distinct endpoints
+## 5. Gateway transactions, $0.582750 USDC across 6 distinct endpoints
 
 Bar was ≥3 endpoints and ≥0.5 USDC. Gateway balance `1.000000` → **`0.417250`**.
 
@@ -227,7 +227,7 @@ time                      chain  mode          amount     status method url
 2026-08-07T02:04:36.480Z  base   routed-x402   $0.010500  400    POST   x402.tavily.com/search
 ```
 
-All signed by Circle MPC — SCA owner `0x9FC67499eB58AB608787a5C5F43F7230E9916523`.
+All signed by Circle MPC, SCA owner `0x9FC67499eB58AB608787a5C5F43F7230E9916523`.
 
 ### `selat spend`
 
@@ -249,13 +249,13 @@ Settled spend (money out of Gateway)           source: selat-pay ledger
 
 **Credit where it's due:** that warning is exactly right and rare. It states the loss, says plainly
 there is no recourse, and points at the identifiers you'd need to chase it. No product wants to
-write that sentence and writing it is the correct call. One nuance — the `$0.561750 total` above
+write that sentence and writing it is the correct call. One nuance, the `$0.561750 total` above
 it counts only successful settlements, so it understates actual Gateway outflow ($0.582750) by the
 $0.021 it flags separately. (Finding 23)
 
 ### The errors, in full
 
-**Charged 400** — POST without a body:
+**Charged 400**, POST without a body:
 
 ```
 $ selat-pay POST https://x402.tavily.com/search --chain base --max-amount 0.02
@@ -271,9 +271,9 @@ $ selat-pay POST https://x402.tavily.com/search --chain base --max-amount 0.02
 
 Balance before `1.000000` → after `0.989500`.
 
-**Charged 422** — wrong body shape for Nansen: `"error": "Missing field"`, billed $0.010500.
+**Charged 422**, wrong body shape for Nansen: `"error": "Missing field"`, billed $0.010500.
 
-**Discovery blocked (sessions 1–2)** — same call, two different reports:
+**Discovery blocked (sessions 1 to 2)**, same call, two different reports:
 
 ```
 $ selat search "web search"
@@ -296,14 +296,14 @@ $ selat skill compare "summarize a webpage" --limit 3
 ```
 
 `https://router.selat.ai` is documented as the default in three shipped files and written by
-`selat init`, but `selat-pay.mjs:1192` has no fallback — so a free, wallet-free command is gated
+`selat init`, but `selat-pay.mjs:1192` has no fallback, so a free, wallet-free command is gated
 behind wallet creation for no functional reason. (Finding 11)
 
 ---
 
 ## 6. Skill PR (step 8)
 
-**https://github.com/SELAT-AI/selat-skills/pull/58** — `Add skill: destination-brief`
+**https://github.com/SELAT-AI/selat-skills/pull/58**, `Add skill: destination-brief`
 
 A 3-step routed skill: Tripadvisor location search → Tavily web context → SerpApi SERP,
 ~$0.037 per run. Picked travel because none of the hub's 18 existing skills cover it.
@@ -312,20 +312,20 @@ A 3-step routed skill: Tripadvisor location search → Tavily web context → Se
 0 errors, 0 warnings.
 
 All three endpoints were exercised with **real settled calls** while authoring, not only probed, so
-`references/endpoints.md` records live quote IDs and observed prices rather than catalogue claims —
+`references/endpoints.md` records live quote IDs and observed prices rather than catalogue claims,
 including the Tavily schema drift I paid $0.0105 to discover.
 
 ---
 
 ## Fix list, in the order I'd do them
 
-1. **Finding 12** — route `probeUpstream()` through `${routerUrl}/proxy?target=…`, the URL the same
+1. **Finding 12**, route `probeUpstream()` through `${routerUrl}/proxy?target=…`, the URL the same
    file already builds 240 lines later. Collapses egress from 526 hosts to one.
-2. **Finding 21** — validate `--body` against `inputSchema` before signing. $0.021 of my $0.58 went
+2. **Finding 21**, validate `--body` against `inputSchema` before signing. $0.021 of my $0.58 went
    to requests the tool could have rejected for free.
-3. **Finding 20** — stop emitting `--body '{}'` in `exec_hints[].cmd` for endpoints with required
+3. **Finding 20**, stop emitting `--body '{}'` in `exec_hints[].cmd` for endpoints with required
    fields. It is a copy-paste path to a paid 400.
-4. **Finding 11** — default `SELAT_ROUTER_URL`. One `??`.
-5. **Finding 16** — handle `--help` in `selat fund` before the TTY check.
+4. **Finding 11**, default `SELAT_ROUTER_URL`. One `??`.
+5. **Finding 16**, handle `--help` in `selat fund` before the TTY check.
 
-1 and 2 are the difference between "promising" and "usable". 3–5 are half-hour fixes.
+1 and 2 are the difference between "promising" and "usable". 3 to 5 are half-hour fixes.
