@@ -664,3 +664,71 @@ router matters — would have saved all three sessions of this run.
 
 Steps 1–3 complete. Step 4 (funding) is the next action and needs the user to send USDC to
 `0x01224a287d5cbf9bfbd9cec6f93007a661062aac`. Steps 5–6 follow immediately after.
+
+## Finding 18 — the body-validation retry exists on the direct probe but not the routed one
+
+`probeUpstream()` carries an explicit workaround for gateways that validate the request body
+*before* issuing a 402, and names the offender in a source comment (~`selat-pay.mjs:1085`):
+
+> *Some gateways validate the request body BEFORE issuing the 402 challenge (observed live:
+> `mpp.orthogonal.com` and `api.aisa.one/v1` answer an empty/absent body with a 4xx naming the
+> missing fields, 402 only once they're present). On such a 4xx we parse the named fields and
+> retry ONCE with sampleValue placeholders.*
+
+That retry lives on the **direct** probe path. The **routed** probe at line 1394 has no equivalent,
+so the same merchants fail there with the router's passthrough of the merchant's 400:
+
+```
+$ selat-pay POST https://mpp.orthogonal.com/nyne/person/newsfeed --chain base --probe-only
+[selat-pay] error: expected 402 from router, got 502: {"error":"expected upstream 402 challenge, got 400"}   mode=routed-mpp
+```
+
+I probed 11 catalog endpoints on `mpp.orthogonal.com` priced $0.10–$0.44 — the single densest
+reachable host in the catalog after Apify, at 78 entries. **One** produced a live 402. Six failed
+with the 502-wrapping-400 above; four with `no x402 or MPP challenge detected`. The retry that
+would have fixed most of them is implemented, tested against this exact host, and simply not
+reached on the path `--probe-only` takes.
+
+Combined with Finding 12 this is the same shape twice: the routed path is missing logic the direct
+path has, so whichever one you need is the one that's incomplete.
+
+## Probe census — what is actually payable from an egress-restricted host
+
+42 catalog endpoints free-probed across every reachable merchant family, all priced ≥ $0.01:
+
+| Family | probed | live 402 |
+|---|---|---|
+| `*.mpp.tempo.xyz` | 8 | **6** |
+| `parallelmpp.dev` | 2 | **2** |
+| `api.messari.io` | 2 | **2** |
+| `api.nansen.ai` | 2 | **2** |
+| `*.x402.paysponge.com`, `x402.tavily.com`, `stablesocial.dev` | 4 | **4** |
+| `*.mpp.paywithlocus.com` | 13 | 0 |
+| `mpp.orthogonal.com` | 11 | 1 |
+
+`*.mpp.tempo.xyz` and the direct x402 merchants are in good shape. **`*.mpp.paywithlocus.com` went
+0 for 13** — CoinGecko, Brave Search, Wolfram|Alpha, Stability AI, ScreenshotOne, Deepgram, Hunter,
+RentCast, Billboard all returned `no x402 or MPP challenge detected` on a reachable host that
+answers HTTP. That is a whole rail's worth of catalog listings that a buyer cannot transact
+against, and nothing in `selat search` output distinguishes them from the ones that work — which
+is Finding 14's "ranking is payability-blind" restated with numbers.
+
+The 10 endpoints I could verify as live and priced, totalling **$0.5475**, are the paid-call plan:
+
+```
+$0.3000  POST  parallelmpp.dev/api/task                      Parallel — research task
+$0.0788  GET   googlemaps.mpp.tempo.xyz/solar/v1/dataLayers  Google Maps Solar
+$0.0600  POST  stablesocial.dev/api/reddit/search            StableSocial — Reddit
+$0.0420  POST  fal.mpp.tempo.xyz/xai/grok-imagine-image      fal.ai — image gen
+$0.0158  GET   serpapi.mpp.tempo.xyz/search                  SerpApi
+$0.0105  GET   spyfu.mpp.tempo.xyz/apis/serp_api/v2/seo/*    SpyFu
+$0.0105  GET   goflightlabs.mpp.tempo.xyz/flight-prices      GoFlightLabs
+$0.0100  POST  x402.tavily.com/search                        Tavily
+$0.0100  POST  api.nansen.ai/api/v1/tgm/flows                Nansen
+$0.0100  GET   tripadvisor.x402.paysponge.com/…/location/search  Tripadvisor
+```
+
+Note the live prices run ~5% above the catalog's listed figures on the Tempo rail
+(SerpApi listed $0.0150 → live $0.015750; Google Maps $0.0750 → $0.078750; fal.ai $0.0400 →
+$0.042000). Consistent 1.05×, so the catalog appears to list pre-markup prices. Small, but a
+budgeting agent that trusts `minAmountUsd` will under-estimate every Tempo call.
