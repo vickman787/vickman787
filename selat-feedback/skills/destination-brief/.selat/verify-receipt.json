@@ -1,0 +1,51 @@
+{
+  "schema": "selat-verify/v1",
+  "verifiedAt": "2026-08-07T06:22:50.290Z",
+  "skill": "destination-brief",
+  "paidMode": false,
+  "ok": true,
+  "steps": [
+    {
+      "index": 0,
+      "label": "points of interest — Tripadvisor location search (routed x402 via SELAT Router)",
+      "rail": "routed",
+      "method": "GET",
+      "url": "https://tripadvisor.x402.paysponge.com/api/v1/location/search?searchQuery=Lisbon%2C%20Portugal",
+      "maxAmount": 0.03,
+      "mode": "routed-x402",
+      "livePriceUsd": 0.0105,
+      "reachable": true,
+      "withinCap": true,
+      "paid": null,
+      "error": null
+    },
+    {
+      "index": 1,
+      "label": "web context — Tavily search (routed x402 via SELAT Router)",
+      "rail": "routed",
+      "method": "POST",
+      "url": "https://x402.tavily.com/search",
+      "maxAmount": 0.03,
+      "mode": "routed-x402",
+      "livePriceUsd": 0.0105,
+      "reachable": true,
+      "withinCap": true,
+      "paid": null,
+      "error": null
+    },
+    {
+      "index": 2,
+      "label": "SERP — SerpApi Google results (routed MPP via SELAT Router)",
+      "rail": "routed",
+      "method": "GET",
+      "url": "https://serpapi.mpp.tempo.xyz/search?q=Lisbon%2C%20Portugal&engine=google",
+      "maxAmount": 0.03,
+      "mode": "routed-mpp",
+      "livePriceUsd": 0.01575,
+      "reachable": true,
+      "withinCap": true,
+      "paid": null,
+      "error": null
+    }
+  ]
+}
