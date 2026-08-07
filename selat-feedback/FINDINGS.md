@@ -558,3 +558,109 @@ Steps 1–2 (install, discovery) are **complete**. Findings 11–14 are new this
 confirmed. Steps 3–6 (wallet, funding, paid calls, verify) are unblocked network-wise —
 `api.circle.com` answers and the reachable-merchant list above has enough live endpoints to clear
 the ≥3-endpoint / ≥0.5 USDC bar — but they are waiting on the user for an email, an OTP, and USDC.
+
+---
+
+# Session 3 (cont.) — wallet created, and three more findings from the init path
+
+Step 3 is **done**. `selat init` completed exit 0: logged in as Vickmancrypto@gmail.com, wallet
+`0x01224a287d5cbf9bfbd9cec6f93007a661062aac`, config at `/root/.config/selat-pay/.env` (0600),
+and a Circle spending policy of **$0.50/tx · $2/day · $2/wk · $2/mo**. Two separate email OTPs
+were required — one to log in, one to write the policy.
+
+The policy prompt is the best safety design in the product. It is offered unprompted, before
+funding, it explains *why* it matters in one sentence ("the one hard ceiling the agent literally
+cannot bypass"), and it defaults to yes. Every agent-payments tool should do this.
+
+## Finding 15 — `selat init`'s non-interactive flags cannot complete an init
+
+`selat init --help` advertises two flags explicitly for headless use:
+
+```
+  --email <address>   Circle agent account email (skips the login email prompt).
+  --wallet <n|address|new>
+                      … For agent shells / CI with no TTY.
+```
+
+Both are honoured. Init still dies, at step 4 of 8:
+
+```
+[3/8] Checking Circle CLI
+      ✓ Circle CLI installed
+[4/8] Circle Agent Wallet login
+      ✗ not logged in, and this shell has no TTY for the email/OTP login.
+      Log in from an interactive terminal first: circle wallet login <email> --type agent
+      (the Circle CLI prompts for the 6-digit code), then re-run `selat init` here.
+[[EXIT 1]]
+```
+
+The flags skip SELAT's *own* prompts, but step 4 shells out to the Circle CLI, which opens its own
+TTY-only prompt. So the documented CI path stops one step past the flags it documents. `--email`
+in particular reads as though it makes login headless; it only pre-fills the address.
+
+Worse, the remediation pushes the operator to run `circle wallet login` **directly** — the raw
+Circle CLI — which is exactly what SELAT's own docs tell agents not to touch. An operator
+following this text ends up outside the abstraction the product is selling.
+
+**Workaround** (what I did): give `selat init` a pty instead, so it drives the Circle login itself
+and the operator never touches `circle`:
+
+```bash
+tail -f /tmp/otp_feed | script -qfe -c "selat init --email <addr>" /tmp/init.raw &
+# then write each answer to /tmp/otp_feed as its prompt appears
+```
+
+**Fix:** either pass the OTP through (`--otp`, or read it from stdin when not a TTY), or make the
+remediation say "re-run under `script -c`" rather than "go use the Circle CLI directly".
+
+## Finding 16 — `selat fund --help` doesn't print help, on the one command that moves money
+
+```
+$ selat fund --help
+✗ no TTY to prompt for the deposit amount — re-run with --amount <usdc> (and --yes to confirm the deposit)
+$ selat fund -h
+✗ no TTY to prompt for the deposit amount — re-run with --amount <usdc> (and --yes to confirm the deposit)
+```
+
+Under a pty it's worse — `--help` is ignored and the command sits on the amount prompt waiting for
+a number. `fund` reaches for the amount before it parses `--help`, so the flag never gets handled.
+
+Every other command I ran (`search`, `skill compare`, `init`, `doctor`) handles `--help` correctly.
+`fund` is the one that moves USDC, and it is the one whose documentation you cannot read without
+either guessing flags or reading the source. I only know `--amount`, `--yes`, `--wait`, `--chain`
+and `--method eco` from the error strings and from other commands' output.
+
+**Fix:** handle `--help`/`-h` before the TTY check. One line, in the command that most needs it.
+
+## Finding 17 — correction to Finding 10: `doctor` *does* check the network, but only the router
+
+Sessions 1–3 reported `selat doctor` as network-blind. That was measured pre-init, and it was
+incomplete. **Post-init, `doctor` grows a network section:**
+
+```
+Router reachability:
+  ✓ https://router.selat.ai/healthz returns 200
+```
+
+So the check exists — it is just gated behind `selat init` writing `SELAT_ROUTER_URL`, which means
+it is absent for the entire window in which a new user is most likely to be debugging egress. The
+substance of Finding 10 survives, narrowed:
+
+1. The one host `doctor` probes is `router.selat.ai` — the host that, per Finding 12, is the *only*
+   one that ought to need reaching. It does not probe any of the five catalog registries
+   (`catalog.selat.ai`, `api.circle.com`, `*.apify.com`, `api.cdp.coinbase.com`, `mpp.dev`) whose
+   failure is what actually kills discovery (Finding 7). A user whose `selat search` returns
+   nothing gets a green `doctor`.
+2. It does not check `SELAT_ROUTER_URL` is *set* before init — the exact gap that makes the free
+   `skill compare` fail (Finding 11).
+3. It prints **`All checks passed.`** while four ⚠ lines about a zero balance sit above it.
+   Pre-init it printed `3 check(s) failed.` for the same wallet-absent condition. The summary
+   line and the body disagree.
+
+Adding the five registries to `doctor`'s probe list — or, better, fixing Finding 12 so only the
+router matters — would have saved all three sessions of this run.
+
+## Status
+
+Steps 1–3 complete. Step 4 (funding) is the next action and needs the user to send USDC to
+`0x01224a287d5cbf9bfbd9cec6f93007a661062aac`. Steps 5–6 follow immediately after.

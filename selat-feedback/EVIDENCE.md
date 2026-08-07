@@ -460,3 +460,113 @@ Config:              ✗ /root/.config/selat-pay/.env missing or empty — run `
 Run on a network where every SELAT host resolves and answers. `doctor` reports nothing about it —
 and it does not check `SELAT_ROUTER_URL`, which is the one config value Finding 11 shows will
 break a free command.
+
+## `selat init` — non-interactive attempt fails at step 4 (Finding 15)
+
+```
+$ selat init --email <addr>            # stdin a pipe, no TTY
+[1/8] Checking prerequisites          ✓ node v22.22.2
+[2/8] Checking agent-payment skill    ✓ skill at …/@selat-ai/selat-discovery
+[3/8] Checking Circle CLI             Circle CLI not found — installing @circle-fin/cli…
+                                      added 164 packages in 26s
+                                      ✓ Circle CLI installed
+[4/8] Circle Agent Wallet login
+      ✗ not logged in, and this shell has no TTY for the email/OTP login.
+      Log in from an interactive terminal first: circle wallet login <addr> --type agent
+      (the Circle CLI prompts for the 6-digit code), then re-run `selat init` here.
+[[EXIT 1]]
+```
+
+## `selat init` under a pty — completes (Finding 15 workaround)
+
+```
+$ tail -f /tmp/otp_feed | script -qfe -c "selat init --email <addr>" /tmp/init2.raw
+[4/8] Circle Agent Wallet login
+      A login code will be sent to <addr>.
+      The Circle CLI will prompt for the 6-digit code.
+Enter the 6-digit OTP from your email after D3N-: ******
+Logged in as <addr>
+      ✓ logged in as <addr>
+[5/8] Creating agent wallets
+      ✓ 3 agent wallets found on this Circle account
+      Checking Gateway balances…
+      1. 0x01224a287d5cbf9bfbd9cec6f93007a661062aac  Gateway: 0.000000 USDC  (default)
+      2. 0x0af826448d204ee0f990d4518a6b5d6797e3fc93  Gateway: 0.000000 USDC
+      3. 0x7056a1ccc589d6c2fccc23e61360a0745bdfce32  Gateway: 0.000000 USDC
+▸ Wallet to use [1-3/new] (1) 1
+      ✓ wallet 0x01224a287d5cbf9bfbd9cec6f93007a661062aac
+      across 3 Circle-supported chains
+[6/8] Checking selat-pay              ✓ selat-pay installed (bundled with selat-cli)
+[7/8] Writing config                  ✓ /root/.config/selat-pay/.env (mode 0600)
+      SELAT_ROUTER_URL=https://router.selat.ai
+      SELAT_AGENT_WALLET_ADDRESS=0x01224a287d5cbf9bfbd9cec6f93007a661062aac
+[8/8] Funding check
+      No USDC yet — fund before paid calls: selat fund --amount 2
+
+⚠ This wallet has NO spending caps — a runaway agent could spend the full balance.
+      Circle wallet policy (per-tx/daily/weekly/monthly) is the one hard ceiling
+      the agent literally cannot bypass. Strongly recommended before funding.
+▸ Set spending caps now? [Y/n] (y) y
+
+▸ Per-transaction cap (USDC) (5) 0.50
+▸ Daily cap (USDC) (50) 2
+▸ Weekly cap (USDC) (200) 2
+▸ Monthly cap (USDC) (500) 2
+
+⚠ Circle will send a one-time code to your email.
+Enter the code at the prompt below. This is Circle's policy-write security layer.
+Enter the 6-digit OTP from your email after CQJ-: ******
+Policy updated for 0x01224a287d5cbf9bfbd9cec6f93007a661062aac on BASE.
+┌─────────────────────┬────────┬───────┬────────┬─────────┬────────┐
+│ Policy Type         │ Per-Tx │ Daily │ Weekly │ Monthly │ Origin │
+├─────────────────────┼────────┼───────┼────────┼─────────┼────────┤
+│ STABLECOIN_TRANSFER │   0.50 │     2 │      2 │       2 │ CUSTOM │
+└─────────────────────┴────────┴───────┴────────┴─────────┴────────┘
+✓ policy set
+
+You're ready.
+Script done — [COMMAND_EXIT_CODE="0"]
+```
+
+Two distinct email OTPs: `D3N-` to log in, `CQJ-` to write the policy.
+Policy write reports `on BASE` only, though the wallet spans 3 chains.
+
+## `selat fund --help` never prints help (Finding 16)
+
+```
+$ selat fund --help
+✗ no TTY to prompt for the deposit amount — re-run with --amount <usdc> (and --yes to confirm the deposit)
+$ selat fund -h
+✗ no TTY to prompt for the deposit amount — re-run with --amount <usdc> (and --yes to confirm the deposit)
+$ script -qec "selat fund --help" /dev/null      # under a pty
+<hangs on the amount prompt; killed at 180s>
+```
+
+`search`, `skill compare`, `init` and `doctor` all handle `--help` correctly.
+
+## `selat doctor` after init — gains a network section (Finding 17)
+
+```
+Binaries:            ✓ node v22.22.2   ✓ npm 10.9.7   ✓ git 2.43.0
+Agent-payment skill: ✓ skill at …/@selat-ai/selat-discovery
+Circle CLI:          ✓ circle binary on PATH
+                     ✓ authenticated as Vickmancrypto@gmail.com
+Agent Wallet:        ✓ wallet 0x01224a287d5cbf9bfbd9cec6f93007a661062aac
+                     ⚠ Gateway balance: 0 USDC (run `selat fund`)
+                     ⚠ on-chain USDC base: 0.00
+                     ⚠ on-chain USDC optimism: 0.00
+                     ⚠ on-chain USDC arbitrum: 0.00
+                     ⚠ on-chain USDC polygon: 0.00
+                     ⚠ No on-chain USDC and Gateway is empty — run `selat fund`
+Spending policy:     ✓ capped at $0.5/tx · $2/day · $2/wk · $2/mo
+selat-pay:           ✓ selat-pay installed (bundled, v0.9.4)
+Config:              ✓ /root/.config/selat-pay/.env present
+                     ✓ SELAT_ROUTER_URL=https://router.selat.ai
+                     ✓ SELAT_AGENT_WALLET_ADDRESS=0x01224a287d5cbf9bfbd9cec6f93007a661062aac
+Router reachability: ✓ https://router.selat.ai/healthz returns 200
+
+All checks passed.
+```
+
+`Router reachability` is the only network probe, and it is absent pre-init. Six ⚠ lines above
+`All checks passed.` The same wallet-absent condition printed `3 check(s) failed.` before init.
