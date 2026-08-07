@@ -1,112 +1,117 @@
 # Screen recording script (Pond AI form, question 3)
 
-Target: "discovery through paid calls, under normal usage conditions." About 4 to 6 minutes.
-Everything below is real, no simulation. The wallet is on the Circle account, so the paid call
-at step 6 genuinely settles.
+Target: "using the SELAT plugin under normal usage conditions, ideally covering discovery through
+paid calls." About 5 to 8 minutes.
 
-Balance available: **0.417250 USDC**. The whole script spends about **$0.026**.
+The question says **plugin**, and the bounty's own task prompts are natural language, so record the
+agent driving SELAT rather than hand typed CLI calls. Q2 was answered "Claude Code", so the
+recording should match that.
 
-## Before you hit record
+Everything below is a real run. The wallet lives on the Circle account, not in any container, so
+the paid calls genuinely settle. Balance available: **0.417250 USDC**. The script spends about
+**$0.03**.
+
+## Setup, off camera
+
+VS Code with the Claude Code extension, or Claude Code in the VS Code integrated terminal. Either
+reads as normal usage.
 
 ```bash
-npm i -g @selat-ai/selat-cli @selat-ai/selat-pay
+npm i -g @selat-ai/selat-cli
+claude plugin marketplace add SELAT-AI/selat-plugins
+claude plugin install selat@selat-plugins
 export SELAT_ROUTER_URL=https://router.selat.ai
 ```
 
-Do `selat init` off camera if you would rather not film the OTP, it needs a 6 digit code emailed
-to Vickmancrypto@gmail.com. Filming it is fine too, just blur or skip the code. On a new machine
-the local `selat history` starts empty, which is expected, the ledger is per machine while the
-balance is not.
+Then `selat init` if this machine has never run it. It emails a 6 digit code to
+Vickmancrypto@gmail.com. Do this off camera, or film it and skip past the code.
 
-## On camera
+The local `selat history` starts empty on a new machine. That is expected, the ledger is per
+machine while the balance is not.
 
-**1. Environment, 10 seconds**
+## On camera, prompts not commands
 
-```bash
-selat --version && node -v
-```
+Type these to the agent and let it work. Pause after each so the output is readable.
 
-**2. Health check**
+**1. Confirm the setup**
+
+> Run selat doctor and tell me if my SELAT setup is healthy.
+
+Shows wallet, Gateway balance, spending policy, router reachability.
+
+**2. Discovery, free**
+
+> Find me a web search endpoint I can pay for through SELAT. Don't spend anything yet.
+
+The agent should run `selat search`. The line worth pausing on is
+`Catalog: 2596/2596 merged services`, that is all five registries merging.
+
+**3. What skills exist**
+
+> What SELAT skills are available to install?
+
+**4. Price it before spending**
+
+> Probe the Tavily x402 search endpoint so I can see the live price without paying.
+
+Expect `--probe-only` and a quoted price around $0.0105.
+
+**5. The paid call**
+
+> Make one paid call to https://x402.tavily.com/search searching for "x402 agent payments
+> protocol". Send a proper JSON body with a query field, cap it at $0.02, and tell me the price
+> before you settle.
+
+Asking for the body explicitly matters. Without it the merchant returns `400 Validation failed`
+and you are charged anyway, which is Finding 21. Costs about $0.0105 and ends `status=200` with
+real results.
+
+**6. A second endpoint on the other rail**
+
+> Now make a paid call to the SerpApi endpoint at serpapi.mpp.tempo.xyz searching for
+> "x402 protocol" on Google, capped at $0.03.
+
+About $0.01575 and settles `routed-mpp` rather than `routed-x402`, so the recording covers both
+rails.
+
+**7. Verify**
+
+> Show me my SELAT payment history and total spend.
+
+`selat history` and `selat spend`. Screenshot this frame, it doubles as the Gateway transactions
+artifact the later question asks for.
+
+## If the agent goes off script
+
+Two failure modes are worth knowing rather than being surprised by on camera.
+
+- **It picks a different endpoint than you asked for.** Most catalogue merchants are on hosts that
+  may not resolve or may not serve a challenge. Steer it back to the two named above, both are
+  confirmed working.
+- **It omits the request body.** That is a charged 400. If it happens, leave it in the recording
+  and say so, it is a genuine demonstration of the most serious finding in the submission.
+
+The Circle policy caps every transaction at $0.50 and the day at $2, so the agent cannot run away
+with the balance regardless.
+
+## Fallback, if the plugin misbehaves
+
+Direct CLI, same coverage, less representative of "plugin usage":
 
 ```bash
 selat doctor
-```
-
-Shows the wallet, the Gateway balance, the spending policy, and the router reachability line.
-
-**3. Discovery, free**
-
-```bash
 selat search "web search"
-```
-
-The line to pause on is `Catalog: 2596/2596 merged services`, that is all five registries merging.
-
-**4. Available skills**
-
-```bash
 selat skill list --available
-```
-
-Reliability dots and the "checked Nh ago" timestamp.
-
-**5. Free probe before spending**
-
-```bash
 selat-pay POST https://x402.tavily.com/search --chain base --max-amount 0.02 --probe-only
-```
-
-Prints the live 402 quote without settling. Worth showing, it is the responsible step before a
-paid call.
-
-**6. Paid call, this one settles**
-
-```bash
 selat-pay POST https://x402.tavily.com/search --chain base --max-amount 0.02 \
   --body '{"query":"x402 agent payments protocol","max_results":3}'
-```
-
-Costs $0.0105. Ends `status=200` with real search results.
-
-**Do not omit `--body`.** Without it the merchant returns `400 Validation failed` and you are
-still charged, which is Finding 21. If you want to demonstrate that bug on camera it is a
-deliberate $0.0105, otherwise keep the body.
-
-**7. A second endpoint, different rail**
-
-```bash
 selat-pay GET "https://serpapi.mpp.tempo.xyz/search?q=x402+protocol&engine=google" \
   --chain base --max-amount 0.03
-```
-
-Costs $0.01575, settles `routed-mpp` rather than `routed-x402`, so the recording covers both rails.
-
-**8. Verify the spend**
-
-```bash
 selat history
 selat spend
 ```
 
-This is also the artifact for the "Gateway transactions screenshot" question. Screenshot this
-frame, or export it separately.
-
-## If you want the run to also show the headline finding
-
-Optional, free, about 20 seconds. Shows that the router reaches a host direct egress cannot,
-which is Finding 12:
-
-```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://api.agentstools.dev/search
-curl -sD - "https://router.selat.ai/proxy?target=https%3A%2F%2Fapi.agentstools.dev%2Fsearch" \
-  | head -3
-```
-
-Only meaningful from a network that blocks the first host. On an unrestricted home connection
-both succeed and the point does not land, so skip it unless you are recording from a restricted
-environment.
-
-## Things worth narrating
+## Worth narrating
 
 - No API keys anywhere, no accounts with any of the merchants.
 - Each call settles in seconds against one USDC balance.
