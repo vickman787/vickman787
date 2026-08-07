@@ -15,6 +15,7 @@ Raw terminal output: **[`EVIDENCE.md`](https://github.com/vickman787/vickman787/
 | Versions | `@selat-ai/selat-cli` **0.15.7** · bundled `selat-pay` 0.9.4 · plugin `selat@selat-plugins` 0.1.8 |
 | Network | **Egress-restricted sandbox with a host allowlist.** This turned out to be the single most important fact about the run. |
 | Duration | Three sessions over ~8 hours |
+| Also tested | Windows, where `selat init` cannot complete at all in 0.15.7 (Finding 25) |
 
 Ran the full flow: install → discovery → wallet → funding → paid calls → verify → skill contribution.
 Completed steps 1 to 6 and the optional step 8.
@@ -108,6 +109,17 @@ search output will misjudge every call.
   points you at raw `circle wallet login`, i.e. outside the abstraction SELAT is selling. I worked
   around it by running `selat init` under `script(1)` so it drove the Circle login itself.
   (Finding 15)
+- **`selat init` cannot complete on Windows at all, in the current release.** Every path selat has
+  for locating and running the Circle CLI is POSIX only:
+  `command -v circle` gives ENOENT because `command` is a shell builtin; `which` only exists if
+  Git Bash provides it; `spawn("circle")` gives ENOENT because Node does not apply PATHEXT and the
+  shim is `circle.cmd`; and `spawn("C:\...\circle.cmd")` gives **EINVAL**, because Node 18.20 and
+  later refuse to execute `.cmd` without `shell: true` (the CVE-2024-27980 hardening). So even
+  correctly resolving the absolute path fails on any current Node.
+  Worse, it presents as the wrong problem: under Git Bash the detection step passes, so `doctor`
+  reports **"not authenticated"** and cannot read the spending policy. A Windows user goes looking
+  for a broken login when selat simply never executed the binary. I moved to WSL rather than patch
+  the installed package. (Finding 25)
 - The **spending-policy prompt is the best safety design in the product.** Offered unprompted,
   before funding, explains *why* in one sentence ("the one hard ceiling the agent literally cannot
   bypass"), defaults to yes. Every agent-payments tool should do this. I set $0.50/tx · $2 per
@@ -325,7 +337,10 @@ including the Tavily schema drift I paid $0.0105 to discover.
    to requests the tool could have rejected for free.
 3. **Finding 20**, stop emitting `--body '{}'` in `exec_hints[].cmd` for endpoints with required
    fields. It is a copy-paste path to a paid 400.
-4. **Finding 11**, default `SELAT_ROUTER_URL`. One `??`.
-5. **Finding 16**, handle `--help` in `selat fund` before the TTY check.
+4. **Finding 25**, use `where.exe` on win32 and invoke Circle via `node dist/index.js` rather than
+   the `.cmd` shim. Windows is currently a platform on which the product cannot be onboarded.
+5. **Finding 11**, default `SELAT_ROUTER_URL`. One `??`.
+6. **Finding 16**, handle `--help` in `selat fund` before the TTY check.
 
-1 and 2 are the difference between "promising" and "usable". 3 to 5 are half-hour fixes.
+1 and 2 are the difference between "promising" and "usable". 3 is a paid-error generator.
+4 blocks an entire operating system. 5 and 6 are half-hour fixes.
