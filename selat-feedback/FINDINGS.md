@@ -732,3 +732,113 @@ Note the live prices run ~5% above the catalog's listed figures on the Tempo rai
 (SerpApi listed $0.0150 → live $0.015750; Google Maps $0.0750 → $0.078750; fal.ai $0.0400 →
 $0.042000). Consistent 1.05×, so the catalog appears to list pre-markup prices. Small, but a
 budgeting agent that trusts `minAmountUsd` will under-estimate every Tempo call.
+
+---
+
+# Session 3 (cont.) — first paid call, and it cost money to fail
+
+Funding worked. 1 USDC on Base → `selat fund --amount 1 --yes --wait` → Gateway credited
+`1.000000 USDC`. Deposit-to-spendable took ~10 minutes, at the far end of the documented 5–10.
+
+The first paid call **failed and was charged in full**. Findings 20 and 21 are the two most
+serious things in this whole write-up, because unlike everything before them they cost real money
+rather than time.
+
+## Finding 19 — `doctor`'s "check your deposit" command is not a valid command
+
+While waiting for the deposit, `selat doctor` prints:
+
+```
+⚠ Gateway balance: 0 USDC (run `selat fund`)
+  Deposited recently? Gateway deposits take ~5–10 min to settle — the money isn't lost.
+  Watch it land: `selat fund --wait`, or check `circle gateway balance --all`.
+```
+
+```
+$ circle gateway balance --all
+Error: --address, --chain are required for this command. Missing: --address, --chain.
+```
+
+This is the message shown at the exact moment a user is anxious about whether their money
+arrived, and one of its two suggested commands doesn't run.
+
+## Finding 20 — `exec_hints` emits `--body '{}'` for endpoints whose schema it already has
+
+Every catalog record carries a ready-to-run command. For a POST it is, without exception:
+
+```json
+"cmd": "selat-pay POST https://parallelmpp.dev/api/task --chain base --max-amount 0.45 --body '{}'"
+"cmd": "selat-pay POST https://stablesocial.dev/api/reddit/search --chain base --max-amount 0.09 --body '{}'"
+"cmd": "selat-pay POST https://x402.tavily.com/search --chain base --max-amount 0.015 --body '{}'"
+```
+
+The **same records** carry the required fields:
+
+```json
+parallelmpp.dev/api/task     inputSchema.required = ["input","processor"]
+stablesocial.dev/…/search    inputSchema.required = ["keywords"]
+x402.tavily.com/search       properties include "query"  (merchant enforces it)
+```
+
+So SELAT knows the body it needs and generates a hint guaranteed to fail — and, per Finding 21,
+guaranteed to fail *after* payment. An agent that trusts `exec_hints[].cmd`, which is what it is
+there for, pays for a validation error on every POST endpoint in the catalog.
+
+**Fix:** populate `--body` from `inputSchema.required` with the `sampleValue` placeholders
+`probeUpstream()` already generates for exactly this purpose, or omit `cmd` when the schema has
+required fields and no sample is available. Emitting `{}` when you hold the schema is the worst
+of the three options.
+
+## Finding 21 — payment settles before the upstream validates, and a 400 is non-refundable
+
+```
+$ selat-pay POST https://x402.tavily.com/search --chain base --max-amount 0.02
+[selat-pay] detected: x402=yes mpp=no; mode=routed-x402
+[selat-pay] price=$0.010500 on eip155:8453
+[selat-pay] resolved Circle SCA owner 0x9FC67499eB58AB608787a5C5F43F7230E9916523
+[selat-pay] signed; submitting paid request
+[selat-pay] status=400
+{"error":{"message":"Validation failed","statusCode":400,
+  "details":[{"msg":"Query must be a non-empty string with max 1000 characters",
+              "path":"query","location":"body"}]}}
+```
+
+Gateway balance before: `1.000000 USDC`. After: `0.989500 USDC`. **$0.0105 for an error message.**
+
+The local ledger records it accurately and impotently:
+
+```json
+{"upstreamUrl":"https://x402.tavily.com/search","amountUsd":0.0105,
+ "httpStatus":400,"ok":false,"outcome":"failed"}
+```
+
+`ok:false`, `outcome:"failed"`, money gone. The sequence is sign → settle → send → *then* discover
+the request was malformed. Nothing between "the user typed a command" and "the USDC moved"
+inspects the body against the schema SELAT already holds (Finding 20).
+
+This interacts badly with the rest of the product:
+
+- `--probe-only` returns a clean 402 for a request the merchant will reject, so probing does not
+  predict payability. Every one of the ten endpoints I "verified" was verified only to the depth
+  of "will quote a price".
+- `probeUpstream()` has sample-value generation and there is a `SELAT_PAY_VERIFIED_SCHEMAS_PATH`
+  store, so the pieces for a pre-flight body check exist. Neither runs on the paying path.
+- There is no `--dry-run` on `selat-pay`. `selat run` advertises one; the primitive underneath
+  does not.
+
+**Fix, in order of value:** (1) validate `--body` against `inputSchema` before signing and refuse
+with a diff; (2) make `--probe-only` send the body it would really send, so a probe means
+something; (3) treat a 4xx as a refund/retry case with the router, since the merchant did no work.
+
+For a product whose entire pitch is agents spending money autonomously, "malformed request bills
+at full price and the tool knew the schema" is the finding I would fix before any of the other 20.
+
+## Spend log
+
+| # | Endpoint | Quoted | Live | Result |
+|---|---|---|---|---|
+| 1 | `x402.tavily.com/search` | $0.0100 | **$0.0105** | ✗ 400, charged |
+
+Balance `1.000000` → `0.989500`. Live price came in 5% over the catalog's `minAmountUsd`,
+consistent with the Tempo-rail markup noted earlier — it is not Tempo-specific, it is the
+router's.
