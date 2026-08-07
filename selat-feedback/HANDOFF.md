@@ -7,10 +7,15 @@ output in `EVIDENCE.md`.
 
 **Only step 8 remains, and it is optional** (+5 USDC): scaffold a skill, no PR.
 
-Gateway balance left: **0.417250 USDC**. The container is ephemeral — that balance and the local
-`selat history` die with it, which the user accepted going in. The `selat history` / `selat spend`
-captures are already committed to `EVIDENCE.md`, so the submission does not depend on this
-container surviving.
+Gateway balance left: **0.417250 USDC**, and it is **not** lost when this container dies.
+Earlier notes in this file said otherwise; that was wrong. The wallet
+`0x01224a287d5cbf9bfbd9cec6f93007a661062aac` is a Circle Agent Wallet on the user's own Circle
+account — `selat init` found it among 3 pre-existing wallets on that account — so the balance is
+reachable from any machine after `selat init` with the same email. What actually dies with the
+container is only `/root/.config/selat-pay/.env` and the local
+`/root/.local/state/selat-pay/gateway-history.jsonl` ledger. The `selat history` / `selat spend`
+captures are committed to `EVIDENCE.md`, so nothing needed for the submission depends on this
+container.
 
 ## First thing to do: confirm the policy still holds
 
@@ -135,8 +140,9 @@ policy gap — report it and pick a different endpoint from the reachable list.
 ## Standing constraints from the user
 
 - Confirm before anything that spends or moves funds. Every time, not once.
-- This container is ephemeral — the wallet and local `selat history` die with it. The user was
-  told and chose to proceed here anyway. Get the screenshots before the session goes idle.
+- This container is ephemeral, but **the wallet is not** — it lives on the user's Circle account
+  and survives. Only the local config and `selat history` ledger die with the container, so
+  capture spend output before the session goes idle.
 - Don't route around the egress proxy. If a host is blocked, report it.
 
 ## Decisions carried forward
