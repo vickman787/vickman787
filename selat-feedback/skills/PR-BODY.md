@@ -57,20 +57,23 @@ Not paid-verified end-to-end — a maintainer should paid-re-verify before merge
 
 ---
 
-## How to open it
+## How to open it — one click left
 
-`SELAT-AI/selat-skills` is outside this session's repo scope, so the fork has to be created
-from the GitHub UI first:
+The branch is **already pushed** to your fork, authored as `vickman787`:
 
-1. Fork https://github.com/SELAT-AI/selat-skills → `vickman787/selat-skills`
-2. Push this branch to the fork:
-   ```bash
-   cd /workspace/selat-ai/selat-skills
-   git remote add fork https://github.com/vickman787/selat-skills
-   git push -u fork add-skill-destination-brief
-   ```
-3. Open the PR: https://github.com/SELAT-AI/selat-skills/compare/main...vickman787:add-skill-destination-brief
-   — paste the body above.
+    https://github.com/vickman787/selat-skills/tree/add-skill-destination-brief
 
-Or, once the fork exists, `selat skill submit ./skills/destination-brief` does 2 and 3 in one
-step (it needs a passing verify receipt, which is already written).
+Opening the PR itself has to happen from the browser — creating it writes to
+`SELAT-AI/selat-skills`, which cannot be added to a Claude Code session that already
+has `vickman787` repos (cross-owner adds are unsupported), so both `fork_repository`
+and `create_pull_request` return "not configured for this session".
+
+**Open it here, then paste the body above:**
+
+    https://github.com/SELAT-AI/selat-skills/compare/main...vickman787:selat-skills:add-skill-destination-brief?expand=1
+
+Title: `Add skill: destination-brief`
+
+`selat skill submit ./skills/destination-brief` would also work from a machine with
+`gh` authenticated — it pushes and opens the PR in one step, using the verify receipt
+that is already written.
