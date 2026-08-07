@@ -5,7 +5,9 @@ funding, paid calls, and verification. **6 distinct endpoints, $0.582750 USDC se
 bar of >=3 endpoints and >=0.5 USDC. Findings 1-23 are written up in `FINDINGS.md` with raw
 output in `EVIDENCE.md`.
 
-**Only step 8 remains, and it is optional** (+5 USDC): scaffold a skill, no PR.
+**Step 8 is done too** — `destination-brief` submitted as SELAT-AI/selat-skills#58.
+
+What remains is submitting the feedback itself; the channel for that was never identified.
 
 Gateway balance left: **0.417250 USDC**, and it is **not** lost when this container dies.
 Earlier notes in this file said otherwise; that was wrong. The wallet
@@ -61,7 +63,7 @@ claude plugin install selat@selat-plugins
 | Step 4 funding | ✅ done — 1 USDC deposited, ~10 min to settle |
 | Step 5 paid calls | ✅ **done — 6 endpoints, $0.582750** |
 | Step 6 verify | ✅ done — `selat history` / `selat spend` captured in `EVIDENCE.md` |
-| Step 8 skill scaffold | ⬜ **not started** (optional, +5 USDC) |
+| Step 8 skill | ✅ **submitted — SELAT-AI/selat-skills#58** |
 | Wallet | `0x01224a287d5cbf9bfbd9cec6f93007a661062aac` |
 | Spending policy | $0.50/tx · $2/day · $2/wk · $2/mo, on BASE |
 | Gateway balance | **0.417250 USDC** |
