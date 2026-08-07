@@ -842,3 +842,85 @@ at full price and the tool knew the schema" is the finding I would fix before an
 Balance `1.000000` → `0.989500`. Live price came in 5% over the catalog's `minAmountUsd`,
 consistent with the Tempo-rail markup noted earlier — it is not Tempo-specific, it is the
 router's.
+
+---
+
+# Steps 5–6 complete — paid calls settled, bounty bar cleared
+
+**6 distinct endpoints, $0.582750 USDC spent.** Bar was ≥3 endpoints and ≥0.5 USDC.
+Gateway `1.000000` → `0.417250`. Every call settled through the SELAT Router on Base, signed by
+Circle MPC (SCA owner `0x9FC6…6523`), no API keys anywhere.
+
+| # | Endpoint | Rail | Quoted | Charged | HTTP |
+|---|---|---|---|---|---|
+| 1 | `x402.tavily.com/search` | routed-x402 | $0.0100 | $0.010500 | **400** ✗ |
+| 2 | `x402.tavily.com/search` | routed-x402 | $0.0100 | $0.010500 | 200 ✓ |
+| 3 | `stablesocial.dev/api/reddit/search` | routed-mpp | $0.0600 | $0.063000 | 202 ✓ |
+| 4 | `parallelmpp.dev/api/task` (`pro`) | routed-mpp | $0.3000 | $0.105000 | 200 ✓ |
+| 5 | `fal.mpp.tempo.xyz/xai/grok-imagine-image` | routed-mpp | $0.0400 | $0.042000 | 200 ✓ |
+| 6 | `serpapi.mpp.tempo.xyz/search` | routed-mpp | $0.0150 | $0.015750 | 200 ✓ |
+| 7 | `tripadvisor.x402.paysponge.com/…/location/search` | routed-x402 | $0.0100 | $0.010500 | 200 ✓ |
+| 8 | `api.nansen.ai/api/v1/tgm/flows` | routed-mpp | $0.0100 | $0.010500 | **422** ✗ |
+| 9 | `parallelmpp.dev/api/task` (`ultra`) | routed-mpp | $0.3000 | $0.315000 | 200 ✓ |
+
+**What actually worked well.** Once the body was right, this is a genuinely good experience.
+Seven successful paid API calls across two rails and five merchants, no API keys, no accounts, no
+signup — a Tavily web search, a Reddit search, two Parallel research tasks, an image generation, a
+SERP query and a Tripadvisor lookup, all settled in seconds from one USDC balance. The
+`price=` → `signed` → `status=` stderr trace is legible and the right amount of detail.
+`selat history` and `selat spend` are both well-built.
+
+## Finding 22 — the quoted price is not the price, and the gap is not a fixed markup
+
+Every call came in **above** the catalog's `minAmountUsd` by exactly 5% — except Parallel, which
+came in at **a third** of it:
+
+```
+serpapi      listed $0.0150  →  charged $0.015750   (1.05x)
+fal.ai       listed $0.0400  →  charged $0.042000   (1.05x)
+stablesocial listed $0.0600  →  charged $0.063000   (1.05x)
+tavily       listed $0.0100  →  charged $0.010500   (1.05x)
+parallel     listed $0.3000  →  charged $0.105000   (0.35x)  processor=pro
+parallel     listed $0.3000  →  charged $0.315000   (1.05x)  processor=ultra
+```
+
+The 1.05× is the router's fee and is at least predictable. Parallel is the interesting one: its
+price depends on the **request body** (`processor: pro` vs `ultra`), and `--probe-only` — which
+sends no body — quoted `$0.300000` both times. So the probe price is not a quote for the request
+you are about to make. A budgeting agent that probes, reserves $0.30, then sends `pro` over-reserves
+by 3×; one that probes and sends `ultra` under-reserves and would trip `--max-amount` if it had set
+it tightly from the probe.
+
+This compounds Finding 21: `--probe-only` neither validates your body nor prices it. Its answer is
+"some request to this URL costs about this much", which is weaker than it looks.
+
+## Finding 23 — `selat spend` is honest about charged-but-failed, and that deserves credit
+
+```
+  ⚠ 2 failed call(s); $0.021000 charged-but-failed
+    There is no automatic dispute or chargeback rail for these payments.
+    To follow up, contact the provider directly with the quoteId/tx refs from `selat history`.
+```
+
+This is exactly right, and rare. It states the loss, states plainly that there is no recourse, and
+points at the identifiers you would need to chase it manually. No product wants to write that
+sentence, and writing it is the correct call.
+
+One nuance: the `$0.561750 total` line above it counts only successful settlements, so it
+understates money that actually left Gateway ($0.582750) by the $0.021 it flags separately. The
+warning makes it defensible, but two numbers labelled as totals differ by the amount you lost.
+Reconciling against the balance requires adding them yourself.
+
+## What I would fix, in order
+
+1. **Finding 12** — route `probeUpstream()` through `${routerUrl}/proxy?target=…`. One line.
+   Collapses the egress requirement from 526 merchant hosts to one and unblocks every restricted
+   environment.
+2. **Finding 21** — validate `--body` against the `inputSchema` you already hold before signing.
+   $0.021 of my $0.58 went to two requests the tool could have rejected for free.
+3. **Finding 20** — stop emitting `--body '{}'` in `exec_hints[].cmd` for endpoints with required
+   fields. It is a copy-paste path to a paid 400.
+4. **Finding 11** — default `SELAT_ROUTER_URL`. One `??`.
+5. **Finding 16** — handle `--help` in `selat fund` before the TTY check.
+
+1 and 2 are the difference between "promising" and "usable"; 3–5 are half-hour fixes.

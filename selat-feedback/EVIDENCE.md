@@ -570,3 +570,80 @@ All checks passed.
 
 `Router reachability` is the only network probe, and it is absent pre-init. Six ⚠ lines above
 `All checks passed.` The same wallet-absent condition printed `3 check(s) failed.` before init.
+
+## Paid calls — `selat history` (step 6 capture)
+
+```
+History file: /root/.local/state/selat-pay/gateway-history.jsonl
+Wallet:       0x01224a287d5cbf9bfbd9cec6f93007a661062aac
+Matched: 9   Showing: 9   Total shown: $0.582750 USDC
+
+time                      chain  mode           amount      status method url
+2026-08-07T06:09:38.445Z  base   routed-mpp     $0.315000   200    POST   parallelmpp.dev/api/task
+2026-08-07T06:09:13.587Z  base   routed-mpp     $0.010500   422    POST   api.nansen.ai/api/v1/tgm/flows
+2026-08-07T06:09:07.185Z  base   routed-x402    $0.010500   200    GET    tripadvisor.x402.paysponge.com/api/v1/location/search
+2026-08-07T06:08:58.128Z  base   routed-mpp     $0.015750   200    GET    serpapi.mpp.tempo.xyz/search?q=x402+protocol
+2026-08-07T06:08:42.459Z  base   routed-mpp     $0.042000   200    POST   fal.mpp.tempo.xyz/xai/grok-imagine-image
+2026-08-07T06:07:40.369Z  base   routed-mpp     $0.105000   200    POST   parallelmpp.dev/api/task
+2026-08-07T06:07:28.075Z  base   routed-mpp     $0.063000   202    POST   stablesocial.dev/api/reddit/search
+2026-08-07T06:07:05.090Z  base   routed-x402    $0.010500   200    POST   x402.tavily.com/search
+2026-08-07T02:04:36.480Z  base   routed-x402    $0.010500   400    POST   x402.tavily.com/search
+```
+
+All signed by Circle MPC — signer (SCA owner) `0x9FC67499eB58AB608787a5C5F43F7230E9916523`.
+
+## `selat spend`
+
+```
+Settled spend (money out of Gateway)           source: selat-pay ledger
+  provider                   calls       settled  failed
+  parallelmpp.dev                2     $0.420000       0
+  stablesocial.dev               1     $0.063000       0
+  fal.mpp.tempo.xyz              1     $0.042000       0
+  serpapi.mpp.tempo.xyz          1     $0.015750       0
+  tavily.com                     2     $0.010500       1
+  tripadvisor.x402.paysponge.com 1     $0.010500       0
+  nansen.ai                      1     $0.000000       1
+                                       $0.561750   total
+  ⚠ 2 failed call(s); $0.021000 charged-but-failed
+    There is no automatic dispute or chargeback rail for these payments.
+    To follow up, contact the provider directly with the quoteId/tx refs from `selat history`.
+
+Apify token utilization                        source: apify-token store (cached)
+  (no token bought yet)
+```
+
+Gateway balance: `1.000000` → `0.417250 USDC`. Difference $0.582750, matching `selat history`.
+
+## A successful call, end to end
+
+```
+$ selat-pay POST https://x402.tavily.com/search --chain base --max-amount 0.02 \
+    --body '{"query":"x402 agent payments protocol","max_results":3}'
+[selat-pay] detected: x402=yes mpp=no; mode=routed-x402
+[selat-pay] routing via https://router.selat.ai (protocol hint: x402)
+[selat-pay] quoteId=selatx270ae450-2790-40e6-ba51-c9aa22a75acb
+[selat-pay] price=$0.010500 on eip155:8453
+[selat-pay] payTo=0x1E5Be7e87A876C04AF0ffd725adccf02e998c5C2
+[selat-pay] resolved Circle SCA owner 0x9FC67499eB58AB608787a5C5F43F7230E9916523
+[selat-pay] signed; submitting paid request
+[selat-pay] status=200
+{ "results": [ { "url": "https://www.crossmint.com/learn/agentic-payments-protocols-compared",
+                 "title": "Which is best for your AI agents? (MPP, ACP, AP2, x402)", … } ],
+  "response_time": 1.66, "request_id": "6c3b75a3-7f9b-46da-b8fd-7a8395f64f81" }
+```
+
+## Price vs quote (Finding 22)
+
+```
+endpoint       listed      charged     ratio   note
+serpapi        $0.0150     $0.015750   1.05x
+fal.ai         $0.0400     $0.042000   1.05x
+stablesocial   $0.0600     $0.063000   1.05x
+tavily         $0.0100     $0.010500   1.05x
+tripadvisor    $0.0100     $0.010500   1.05x
+parallel       $0.3000     $0.105000   0.35x   body processor=pro
+parallel       $0.3000     $0.315000   1.05x   body processor=ultra
+```
+
+`selat-pay … --probe-only` sends no body and quoted `$0.300000` for Parallel in both cases.
