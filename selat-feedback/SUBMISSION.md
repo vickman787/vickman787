@@ -16,6 +16,7 @@ Raw terminal output: **[`EVIDENCE.md`](https://github.com/vickman787/vickman787/
 | Network | **Egress-restricted sandbox with a host allowlist.** This turned out to be the single most important fact about the run. |
 | Duration | Three sessions over ~8 hours |
 | Also tested | Windows, where `selat init` cannot complete at all in 0.15.7 (Finding 25) |
+| Screen recording | Made separately on WSL Ubuntu 22.04, Node v22.23.2, because Windows cannot run `selat init` and the original run was in a headless container with no display |
 
 Ran the full flow: install → discovery → wallet → funding → paid calls → verify → skill contribution.
 Completed steps 1 to 6 and the optional step 8.
