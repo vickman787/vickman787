@@ -924,3 +924,63 @@ Reconciling against the balance requires adding them yourself.
 5. **Finding 16** — handle `--help` in `selat fund` before the TTY check.
 
 1 and 2 are the difference between "promising" and "usable"; 3–5 are half-hour fixes.
+
+---
+
+# Step 8 — skill authored, validated and verified (no PR opened)
+
+Built `destination-brief`, a 3-step routed skill: Tripadvisor location search →
+Tavily web context → SerpApi SERP. ~$0.037 per run. Copy committed at
+`selat-feedback/skills/destination-brief/`.
+
+All free gates pass — **no USDC was spent on this step**:
+
+```
+selat skill validate  → ✓ valid
+selat skill verify    → ✓ verified — all steps quote within cap
+                         step 1 routed-x402 $0.0105  / cap $0.03
+                         step 2 routed-x402 $0.0105  / cap $0.03
+                         step 3 routed-mpp  $0.01575 / cap $0.03
+selat skill register  → ✓ added to index.json
+npm run validate      → ✓ 19 skills, 0 errors, 0 warnings   (what CI runs)
+```
+
+Chose travel because the hub's 18 existing skills are all enrichment, social,
+financial or research — there is no travel-planning skill. All three endpoints were
+already proven with live `200`s and real payloads during step 5, so
+`references/endpoints.md` cites actual quote IDs rather than catalogue claims.
+
+## Finding 24 — the pay-before-validate hazard is documented for contributors but not fixed in the tool
+
+`meta/skill-creator/SKILL.md` step 3 tells authors, unprompted:
+
+> *pin the real request shape **before** writing any `body`/`${param}`, from a **free**
+> source, because a wrong param name or shape still costs money: the SELAT Router settles
+> the payment **before** the upstream validates the body, and a `verify` probe checks
+> *payability, not param correctness*.*
+
+That is Finding 21 and Finding 22, stated precisely, by SELAT, in their own docs. They
+know. `schema-enrichment.md` goes further and warns that published specs drift from live
+APIs (`tweet_id` vs `tweetId`; "only field X required" when the live API needs more) — which
+is exactly the Tavily case I paid $0.0105 to discover, where `inputSchema.required` is `[]`
+and the live API 400s without `query`.
+
+So the hazard is understood well enough to warn contributors about in prose, and the fix
+still isn't in the tool: `selat-pay` holds the schema and signs anyway. **Documentation is
+not a mitigation when the failure costs money and the check is mechanical.** Validating
+`--body` against `inputSchema` before signing would enforce what this paragraph asks authors
+to do by hand.
+
+It also slightly softens my Finding 20 — `exec_hints[].cmd` emitting `--body '{}'` is
+consistent with a product that treats body-correctness as the author's problem. That is a
+defensible position for a catalogue. It is not defensible for a **generated, copy-pasteable
+command** that spends money.
+
+## Step 8 status: not submitted
+
+`selat skill submit --dry-run` plans branch `add-skill-destination-brief`, files
+`skills/destination-brief` + `index.json`, PR title "Add skill: destination-brief", body
+carrying the verify receipt. **Not run without `--dry-run`.** The user's standing instruction
+was scaffold-only; the bounty text requires a PR to `SELAT-AI/selat-skills` to claim the
++5 USDC, so this needs an explicit decision. `SELAT-AI/selat-skills` is also outside this
+session's repo scope, so submitting would need a fork or added access.
