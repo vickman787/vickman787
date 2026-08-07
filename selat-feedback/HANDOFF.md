@@ -1,11 +1,12 @@
 # Handoff — resume the SELAT bounty run here
 
-**Session 3 unblocked discovery.** The user's widened allowlist held: all six critical hosts
-answer, `selat search` merges all 2596 services from all 5 catalogs, and `selat skill compare`
-runs. Bounty steps 1 and 2 are **done**. Findings 11–14 are written up.
+**Session 3 got through discovery and the wallet.** The widened allowlist held, `selat search`
+merges all 2596 services from all 5 catalogs, and `selat init` completed — wallet live with a
+Circle spending policy on it. **Bounty steps 1-3 are done.** Findings 11-18 are written up.
 
-**What's left is steps 3–6, and none of it is network-blocked.** It is blocked on the user:
-an email, a 6-digit OTP they type, and ~1 USDC they send. Ask for the email first thing.
+**The only thing left blocking steps 4-6 is money.** Nothing is network-blocked and nothing needs
+another policy change. The user has to send ~1 USDC to the wallet; everything after that is
+mechanical and the endpoint plan is already verified below.
 
 ## First thing to do: confirm the policy still holds
 
@@ -18,7 +19,8 @@ done
 
 `403` means blocked (body reads `Host not in allowlist: <host>`). Anything else is fine —
 session 3 saw `307/404/404/200/404/200/404` and everything worked. **All seven must be non-403.**
-Don't trust `selat doctor` for this; per Findings 9, 10 and 14 it does not probe anything.
+Don't lean on `selat doctor` for this: post-init it probes `router.selat.ai` and nothing else, so
+it goes green while all five catalog registries are unreachable (Finding 17).
 
 ## Set this before running anything
 
@@ -41,57 +43,81 @@ claude plugin install selat@selat-plugins
 
 ## State as of this handoff
 
+**Steps 1-3 are DONE.** Step 4 (funding) is the only thing blocking the rest, and it needs the
+user to send USDC. Nothing else is in the way.
+
 | Item | Status |
 |---|---|
 | `@selat-ai/selat-cli` | reinstall — still 0.15.7, no release since session 1 |
-| `selat doctor` | runs; 3 wallet failures; still no network section |
-| `selat skill list --available` | ✅ 19 skills |
-| `selat search` | ✅ **works** — 2596/2596 merged, all 5 catalogs |
-| `selat skill compare` | ✅ works **with `SELAT_ROUTER_URL` exported** |
-| Circle CLI | not installed; `selat init` installs it |
-| wallet / funding / paid calls | **not started — waiting on the user** |
-| `FINDINGS.md` | Findings 1–14. Sessions 1–3 complete. Needs a payment section if steps 3–6 run. |
+| `@selat-ai/selat-pay` | `npm i -g @selat-ai/selat-pay` for a shell-callable copy (needed for `--probe-only`) |
+| `selat search` / `skill compare` | works (export `SELAT_ROUTER_URL` first) |
+| `selat init` | **done** — needs a pty, see Finding 15 |
+| Circle login | Vickmancrypto@gmail.com |
+| Wallet | `0x01224a287d5cbf9bfbd9cec6f93007a661062aac` (existing default of 3, spans 3 chains) |
+| Spending policy | **$0.50/tx · $2/day · $2/wk · $2/mo**, written on BASE |
+| Config | `/root/.config/selat-pay/.env` (0600) |
+| Gateway balance | **0 USDC — waiting on the user** |
+| `selat doctor` | all green except balance; gains a Router reachability check post-init |
+| `FINDINGS.md` | Findings 1-18. Sessions 1-3. Needs a payment section once step 5 runs. |
 | `EVIDENCE.md` | raw output from all three sessions, with source line numbers |
 
-## Steps 3–6 — the remaining bounty work
+## Step 4 — funding (THE BLOCKER)
 
-**3. Wallet** — get the user's email, then `selat init`, which prompts for a 6-digit OTP.
-Relay the prompt verbatim; the user types the code. Never run `circle` directly; never ask for a
-private key. `api.circle.com` is reachable.
+The user sends USDC on **Base** to `0x01224a287d5cbf9bfbd9cec6f93007a661062aac`, then:
 
-**4. Funding** — read the address back to the user, they send 1 USDC (Base recommended), then
-`selat fund --chain base --amount 1 --method eco`. **Confirm before depositing.** Credits take
-5–10 min; `--wait` blocks until spendable.
-
-**5. Paid calls** — bar is **≥3 distinct endpoints and ≥0.5 USDC total**. `--dry-run` first,
-surface the price, get an explicit OK per call. `selat freeze` is the kill switch.
-
-**Pick targets from the reachable list below, not from `selat search`'s top 5.** Ranking is
-payability-blind (Finding 14) and its top result usually sits on a host this environment blocks.
-Two endpoints already probed clean in session 3:
-
-```
-Otto AI          $0.0010  GET  https://x402.ottoai.services/crypto-news
-Apify person-enrichment  $1.05  POST https://api.apify.com/v2/actors/ryanclinton~person-enrichment-lookup/run-sync-get-dataset-items
-```
-
-$1.05 for the Apify one is most of the budget in a single call — check price before committing.
-Other reachable, well-populated hosts to shortlist from: `mpp.orthogonal.com` (78 entries),
-`*.mpp.paywithlocus.com` (apollo, alphavantage, coingecko, diffbot, hunter, brave, openweather,
-clado, perplexity, deepl, replicate, …), `*.mpp.tempo.xyz` (serpapi, googlemaps, firecrawl,
-kicksdb, flightapi, spyfu, oxylabs, fal), `x402.alchemy.com`, `x402.tavily.com`, `api.nansen.ai`,
-`api.messari.io`, `api.exa.ai`, `parallelmpp.dev`, `stablesocial.dev`, `stabledomains.dev`,
-`tripadvisor.x402.paysponge.com`.
-
-Probe before paying — free and never settles:
 ```bash
-selat skill compare "<intent>" --limit 5      # PROBE ✓ column = payable right now
+selat fund --amount <usdc> --yes --wait     # --wait blocks until spendable
 ```
 
-**6. Verify** — `selat history` / `selat spend`, capture the output for the submission
-**before the session goes idle**, not at the end.
+**Confirm before running it** — it moves funds into Circle Gateway. Deposits take 5-10 min.
+Note `selat fund --help` does not work (Finding 16); those flags come from error strings.
+Watch out for gas: the Gateway deposit is an on-chain tx from the wallet, and it is untested
+whether Circle sponsors it. If it fails for gas, the wallet needs a little ETH on Base.
 
-**8. (optional, +5 USDC)** — user chose **scaffold only, do NOT open a PR**. Author a skill per
+**Send ~1 USDC.** The verified plan below costs $0.5475; 1 USDC leaves headroom for retries and
+stays under the $2 daily cap.
+
+## Step 5 — the paid-call plan (verified, do not re-derive)
+
+All ten free-probed live with a real 402 and a live price. Bar is >=3 endpoints and >=0.5 USDC;
+this is 10 endpoints and **$0.5475**, every call under the $0.50/tx cap.
+
+```
+$0.3000  POST  https://parallelmpp.dev/api/task
+$0.0788  GET   https://googlemaps.mpp.tempo.xyz/solar/v1/dataLayers
+$0.0600  POST  https://stablesocial.dev/api/reddit/search
+$0.0420  POST  https://fal.mpp.tempo.xyz/xai/grok-imagine-image
+$0.0158  GET   https://serpapi.mpp.tempo.xyz/search
+$0.0105  GET   https://spyfu.mpp.tempo.xyz/apis/serp_api/v2/seo/*
+$0.0105  GET   https://goflightlabs.mpp.tempo.xyz/flight-prices
+$0.0100  POST  https://x402.tavily.com/search
+$0.0100  POST  https://api.nansen.ai/api/v1/tgm/flows
+$0.0100  GET   https://tripadvisor.x402.paysponge.com/api/v1/location/search
+```
+
+Saved at `/home/user/selat-run/plan.tsv` (method, url, price, name — tab separated). Re-probe
+before paying, prices drift:
+
+```bash
+selat-pay <METHOD> <URL> --chain base --max-amount 0.50 --probe-only
+```
+
+Do **not** substitute endpoints from `selat search`'s top 5 without probing — ranking is
+payability-blind (Finding 14), `*.mpp.paywithlocus.com` is 0-for-13 despite being reachable, and
+`mpp.orthogonal.com` is 1-for-11 (Finding 18). Messari is live at $0.55 but exceeds the per-tx cap;
+raising the cap costs another email OTP.
+
+Drop `--probe-only` to settle. **Get the user's OK before each call**, surface the live price
+first, and remember `selat freeze` is the kill switch.
+
+## Step 6 — verify
+
+`selat history` / `selat spend`, captured **before the session goes idle**. The container is
+ephemeral and takes the local history with it.
+
+## Step 8 — optional skill contribution (+5 USDC)
+
+User chose **scaffold only, do NOT open a PR**. Author a skill per
 `/workspace/selat-ai/selat-skills/meta/skill-creator/SKILL.md`, run `selat skill validate` and the
 free `selat skill verify`, then stop and hand it to them.
 
