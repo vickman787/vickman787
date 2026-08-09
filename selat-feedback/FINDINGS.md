@@ -984,3 +984,74 @@ carrying the verify receipt. **Not run without `--dry-run`.** The user's standin
 was scaffold-only; the bounty text requires a PR to `SELAT-AI/selat-skills` to claim the
 +5 USDC, so this needs an explicit decision. `SELAT-AI/selat-skills` is also outside this
 session's repo scope, so submitting would need a fork or added access.
+
+---
+
+## Finding 25 — `selat init` cannot complete on Windows: the shell plumbing is POSIX only
+
+Reproduced on a Windows host running `@selat-ai/selat-cli` **0.15.7**, the current release, while
+setting up a second machine. **The product cannot onboard a Windows user at all.** Every path
+selat has for locating and invoking the Circle CLI fails, for four independent reasons:
+
+```
+command -v circle             → ENOENT   (`command` is a shell builtin, not an executable)
+which                         → present only because Git Bash provides it;
+                                not on PATH for a normal PowerShell run
+spawn("circle")               → ENOENT   (Node does not apply PATHEXT, and the shim is circle.cmd)
+spawn("C:\...\circle.cmd")    → EINVAL   (Node >= 18.20 refuses .cmd without shell: true)
+```
+
+The fourth one is the interesting failure. Node 18.20 and 20.12 hardened `child_process.spawn`
+against argument injection on Windows (CVE-2024-27980) by refusing to execute `.bat` and `.cmd`
+files unless `shell: true` is set. So even code that correctly resolves the absolute path to
+`circle.cmd` gets `EINVAL` on any current Node. **This is not a stale-path bug that a PATH fix
+would solve; the spawn call itself is invalid as written.**
+
+### Why it presents as an authentication problem
+
+The failure is silent, and it surfaces as the wrong diagnosis. Under Git Bash the detection step
+*passes*, because `which` happens to exist there, so selat believes the Circle CLI is installed.
+Every subsequent `circle` invocation then fails quietly, and `selat doctor` reports:
+
+```
+✗ not authenticated
+⚠ could not read the wallet spending policy
+```
+
+A Windows user reading that concludes their **login** is broken and goes looking for OTP or
+account problems. The actual cause is that selat never managed to execute the binary. Nothing in
+the output points at process spawning, PATHEXT, or `.cmd`.
+
+This is the third instance in this report of the same failure pattern (see Findings 13 and 19):
+**an error is reported in terms of the layer the user is thinking about rather than the layer that
+actually failed.** In this case it sends them to debug an account rather than an install.
+
+### Relationship to Finding 15
+
+Finding 15 covers `selat init` exiting at step 4 of 8 under a non-TTY shell. This is the same
+subsystem failing for a different reason, and together they suggest the launcher around the Circle
+CLI assumes both a POSIX shell and an interactive TTY, with no fallback for either. On Linux the
+TTY assumption is worked around with `script(1)`. On Windows there is no workaround short of
+patching the installed package.
+
+### What it costs
+
+There is no supported path forward on Windows in 0.15.7. The options are:
+
+1. **Patch the installed package** — make the binary check use `where.exe`, and spawn Circle's
+   `dist/index.js` through `node` rather than through the `.cmd` shim. Works, but it means running
+   modified code, and an `npm upgrade` silently reverts it.
+2. **Run everything under WSL** — POSIX assumptions hold and nothing needs patching. This is what
+   I did. The cost is that the wallet, `~/.config/selat-pay/.env` and the Circle session all live
+   inside WSL, so a Windows-side agent harness cannot see them; the harness has to move into WSL
+   too.
+3. **Wait for a fix.**
+
+**Suggested fix:** use `where.exe` for binary detection on `win32`, and invoke Circle via
+`node <path-to-dist/index.js>` rather than the `.cmd` shim, which sidesteps the `EINVAL` entirely
+and does not require `shell: true` (which would reintroduce the injection surface Node closed).
+Failing that, `spawn(..., { shell: true })` with properly quoted arguments would at least work.
+
+Whichever route, **`doctor` should distinguish "Circle CLI could not be executed" from "Circle CLI
+is not authenticated."** Those are different problems with different fixes, and today they print
+the same message.

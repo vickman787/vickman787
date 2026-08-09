@@ -1,4 +1,14 @@
-# PR to SELAT-AI/selat-skills — ready to open
+# PR to SELAT-AI/selat-skills — OPENED
+
+**https://github.com/SELAT-AI/selat-skills/pull/58** — `Add skill: destination-brief`
+Opened 2026-08-07 by vickman787, `vickman787:add-skill-destination-brief` → `SELAT-AI:main`.
+Head commit `c36da52` (unsigned). 1 commit, 5 files, 317 insertions.
+
+The record below is kept for reference.
+
+---
+
+# Original submission notes
 
 **Branch:** `add-skill-destination-brief`
 **Base:** `SELAT-AI/selat-skills` `main`
